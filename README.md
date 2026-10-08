@@ -27,12 +27,19 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 ## How the images are built
 
 `.github/workflows/<port>-image.yml` builds on GitHub-hosted runners. A push to `main` that touches a port publishes `:main` and
-`:sha-<commit>`, and a tag `<port>-vX.Y.Z` publishes `:X.Y.Z` and `:latest`. Pull requests build without publishing. The run's summary
-gives the image digest and the pull command. `checks.yml` runs the fast checks (shell and Python syntax, ShellCheck, the Dockerfile build
-checks, each port's dry-run tests) on every push.
+`:sha-<commit>`. Pull requests build without publishing. The run's summary gives the image digest and the pull command. `checks.yml`
+runs the fast checks (shell and Python syntax, ShellCheck, the Dockerfile build checks, each port's dry-run tests) on every push.
 
-GitHub publishes a new package as private. After a port's first build, open the package's settings on GitHub and change its visibility
-to public. Setonix can then pull it without credentials.
+A release is not a rebuild. Once an image passes the port's checks on Setonix, `<port>-release.yml` (run from the Actions tab) gives that
+same image, with the same digest, its version tags, and tags its source commit. A version is the upstream model's version plus a port
+revision. `3.1.4-1` is the first release of this port on AlphaFold 3 3.1.4, and `3.1.4-2` would be a change to the port on the same
+upstream release. Each release publishes three tags:
+- `:<version>`, which never moves;
+- `:<upstream version>`, the newest port revision of that release;
+- `:latest`.
+
+The images inherit this repository's public visibility, so Setonix pulls them without credentials (checked for `af3jax`). If a new
+package shows as private, change its visibility in the package's settings on GitHub.
 
 ## Licence
 
