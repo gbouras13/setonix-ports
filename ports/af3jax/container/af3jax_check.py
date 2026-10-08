@@ -77,6 +77,20 @@ def check_alphafold():
         fail(f"no {pk}: build_data did not run")
 
 
+def ldd(sos):
+    """{missing library: {objects needing it}}, and the directories the plugin's ROCm libraries resolve from"""
+    missing, dirs = {}, set()
+    for so in sos:
+        out = subprocess.run(["ldd", so], capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if "not found" in line:
+                missing.setdefault(line.strip().split()[0], set()).add(os.path.basename(so))
+            m = re.search(r"=> (/\S+/)lib(amdhip64|hipsparse|MIOpen|hipblas|rocblas|rccl)\S*\.so", line)
+            if m:
+                dirs.add(m.group(1))
+    return missing, dirs
+
+
 def check_plugin_libs():
     sos = []
     for mod in ("jax_plugins.xla_rocm7", "jax_rocm7_plugin"):
@@ -86,18 +100,31 @@ def check_plugin_libs():
             continue
         for d in spec.submodule_search_locations:
             sos += glob.glob(os.path.join(d, "**", "*.so*"), recursive=True)
-    dirs, missing = set(), set()
-    for so in sos:
-        out = subprocess.run(["ldd", so], capture_output=True, text=True).stdout
-        for line in out.splitlines():
-            if "not found" in line:
-                missing.add(line.strip().split()[0])
-            m = re.search(r"=> (/\S+/)lib(amdhip64|hipsparse|MIOpen|hipblas|rocblas|rccl)\S*\.so", line)
-            if m:
-                dirs.add(m.group(1))
-    for lib in sorted(missing):
-        fail(f"ROCm plugin needs {lib}: not found in the image")
+    missing, dirs = ldd(sos)
+    for lib, users in sorted(missing.items()):
+        fail(f"ROCm plugin needs {lib}: not found in the image (via {', '.join(sorted(users))})")
     say("plugin", f"{len(sos)} shared objects; ROCm libraries resolve from {sorted(dirs) or '-'}; unresolved: {len(missing)}")
+
+
+# The ROCm libraries XLA opens at run time (dlopen), which ldd on the plugin cannot see: each must be installed and resolve everything
+# it links, or the first GPU job fails on Setonix instead of the image build failing here.
+RUNTIME_LIBS = ("amdhip64", "hsa-runtime64", "amd_comgr", "hipblaslt", "rocblas", "hipblas", "MIOpen", "rccl", "roctracer64", "rocsolver",
+                "hipsolver", "rocfft", "hipfft", "rocsparse", "hipsparse", "rocrand", "hiprand", "rocm_smi64")
+
+
+def check_runtime_libs():
+    lib = os.path.realpath("/opt/rocm/lib")
+    sos = []
+    for name in RUNTIME_LIBS:
+        hits = glob.glob(os.path.join(lib, f"lib{name}.so.*"))
+        if not hits:
+            fail(f"lib{name}.so is not installed in {lib}")
+            continue
+        sos.append(max(hits, key=len))   # the fully versioned file
+    missing, _ = ldd(sos)
+    for name, users in sorted(missing.items()):
+        fail(f"{name} not found in the image (needed by {', '.join(sorted(users))})")
+    say("rocm", f"{len(sos)} run-time ROCm libraries in {lib}; unresolved: {len(missing)}")
 
 
 def mapped_gpu_libs():
@@ -161,6 +188,7 @@ def main():
     check_patches()
     check_alphafold()
     check_plugin_libs()
+    check_runtime_libs()
     if not no_gpu:
         check_gpu()
     print(f"[check] {'PASS' if not FAILS else 'FAIL (' + str(len(FAILS)) + ')'}", flush=True)

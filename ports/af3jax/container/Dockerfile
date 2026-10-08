@@ -48,10 +48,11 @@ RUN apt-get update --quiet \
 # What XLA's ROCm plugin needs beyond the base image's HIP runtime (its shared objects link libamdhip64.so.7, libhipsparse.so.4,
 # libMIOpen.so.1; XLA opens hipBLASLt, rocBLAS, hipBLAS, rocSOLVER/hipSOLVER, rocFFT/hipFFT, RCCL and roctracer at run time), the ROCm
 # device bitcode and ld.lld XLA compiles kernels with, rocm-smi / rocprofv3 for diagnosis, and upstream AlphaFold 3's build tools.
+# libdw1t64 (elfutils' libdw.so.1): the plugin needs it, and the ROCm packages do not pull it in (Setonix hosts have it in the OS).
 RUN apt-get update --quiet \
  && apt-get install --yes --quiet --no-install-recommends \
       rccl hipfft rocfft hipsparse rocsparse hipsolver rocsolver hiprand rocrand roctracer \
-      rocm-llvm rocm-device-libs rocm-smi-lib rocprofiler-sdk \
+      rocm-llvm rocm-device-libs rocm-smi-lib rocprofiler-sdk libdw1t64 \
       git wget curl ca-certificates gcc g++ make zlib1g-dev zstd patch \
  && rm -rf /var/lib/apt/lists/* \
  && dpkg-query -W -f '${Package} ${Version}\n' rocm-core hip-runtime-amd hsa-rocr comgr hipblaslt rocblas miopen-hip rccl rocfft rocsolver rocsparse \
