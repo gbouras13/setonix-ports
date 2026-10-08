@@ -24,7 +24,8 @@
 # Then: the wrapper's automatic choices against the expected ones (regime, GEMM library, attention rows per call, weights); verdicts,
 # crashes by name, peaks; the cache check; perf_cmp of each auto run against the plain run of the same input; one speed table.
 #
-# Run (environment, then sbatch --account=<project>-gpu a1audit.sbatch):
+# Run: sbatch --account=<project>-gpu a1audit.sbatch KEY=VALUE ...   (arguments, because sites like Setonix set SBATCH_EXPORT=NONE, so
+# variables set at submission never reach the job; exported variables still work where they do)
 #   A1_DATA     the test data: inputs_ceiling/hk97_{6,8,10,12}mer, inputs_perf/hk97_{mono,4mer}_2s, ref/1OHG.cif (not in this repository)
 #   AF3_PARAMS  the official AlphaFold 3 parameters (af3.bin.zst, sha256 checked; never redistributed: bring your own)
 #   AF3JAX_SIF  the image (pull_image.sbatch): every run goes through `af3jax predict` in it. Unset: the native tree AF3JAX_W instead.
@@ -33,6 +34,12 @@
 #               with the same run there (same inputs, same seeds) -- the container-against-native check
 #   A1_OUT      where the results go (default $A1_DATA)
 set -uo pipefail
+for a in "$@"; do
+  case "$a" in
+    A1_DATA=*|AF3_PARAMS=*|AF3JAX_SIF=*|OF3_WEIGHTS=*|A1_REF=*|A1_OUT=*|AF3JAX_W=*) export "${a?}" ;;
+    *) echo "unknown argument '$a': A1_DATA= AF3_PARAMS= AF3JAX_SIF= OF3_WEIGHTS= A1_REF= A1_OUT= AF3JAX_W="; exit 2 ;;
+  esac
+done
 : "${A1_DATA:?set A1_DATA to the test data directory}" "${AF3_PARAMS:?set AF3_PARAMS to the official parameters directory}"
 IC=$A1_DATA/inputs_ceiling; MN=$A1_DATA/inputs_perf/hk97_mono_2s; M4=$A1_DATA/inputs_perf/hk97_4mer_2s
 XTAL=$A1_DATA/ref/1OHG.cif
@@ -46,6 +53,9 @@ if [ -n "${AF3JAX_SIF:-}" ]; then
   MODE=container
   OF3W=${OF3_WEIGHTS:-$A1_DATA/weights/p2}
   module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+  # after the module, which points the cache at $MYSOFTWARE (on Setonix possibly another project's, unreadable: "Cache disabled")
+  export SINGULARITY_CACHEDIR=/tmp/af3jax.$SLURM_JOB_ID/singularity-cache APPTAINER_CACHEDIR=/tmp/af3jax.$SLURM_JOB_ID/singularity-cache
+  mkdir -p "$SINGULARITY_CACHEDIR"
   SX=(singularity exec -B "$OF3W:/opt/af3jax/weights/p2" "$AF3JAX_SIF")   # never --rocm (the host's ROCm 6.3.0 libraries)
   PRED=("${SX[@]}" af3jax predict); PY=("${SX[@]}" af3jax python); SCRIPTS=/opt/af3jax/scripts
   NEED=("$AF3JAX_SIF" "$OF3W/of3_ported_weights.bin.zst")

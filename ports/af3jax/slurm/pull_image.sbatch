@@ -10,9 +10,10 @@
 
 # Pull the af3_jax image from ghcr.io and turn it into a SIF, on a compute node (Pawsey asks for pulls there, never on a login node).
 #   sbatch --account=<project> pull_image.sbatch [IMAGE] [DEST_DIR]
-#     IMAGE     default ghcr.io/gbouras13/setonix-ports/af3jax:main; a tag (:1.0.0) or a digest (@sha256:...) from the Actions summary
+#     IMAGE     default ghcr.io/gbouras13/setonix-ports/af3jax:main; a tag (:3.1.4-1) or a digest (@sha256:...) from the Actions summary
 #     DEST_DIR  default $MYSCRATCH/singularity. On /scratch the SIF is purged 21 days after it was last read; it is one file, so
-#               rerunning this job brings it back. $MYSOFTWARE/singularity is not purged, if your quota has room (~8 GB).
+#               rerunning this job brings it back. $MYSOFTWARE/singularity is not purged, if your quota has room (~5 GB). $MYSCRATCH
+#               follows your DEFAULT project: if the image belongs elsewhere, give the directory (/scratch/<project>/$USER/singularity).
 # Then: the image's provenance and its self-check without a GPU (versions, patches, the AlphaFold 3 import, every ROCm library resolved
 # inside the image). The GPU check runs in a GPU job: singularity exec "$SIF" af3jax check
 set -euo pipefail
@@ -31,9 +32,10 @@ T=/tmp/af3jax-pull.${SLURM_JOB_ID:-$$}
 mkdir -p "$T/cache" "$T/tmp"
 trap 'rm -rf "$T"' EXIT
 echo "node-local /tmp: $(df -h /tmp | awk 'NR==2 {print $4 " free of " $2 " (" $1 ")"}')"
-export SINGULARITY_CACHEDIR=$T/cache SINGULARITY_TMPDIR=$T/tmp APPTAINER_CACHEDIR=$T/cache APPTAINER_TMPDIR=$T/tmp
 
 module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+# after the module, which sets its own cache directory under $MYSOFTWARE
+export SINGULARITY_CACHEDIR=$T/cache SINGULARITY_TMPDIR=$T/tmp APPTAINER_CACHEDIR=$T/cache APPTAINER_TMPDIR=$T/tmp
 echo "singularity: $(singularity --version)"
 t0=$SECONDS
 singularity pull --force "$SIF.partial" "docker://$IMAGE"

@@ -36,7 +36,7 @@ unchanged. Leave it on: the wrapper warns if it is turned off.
   against the native A1 run (below).
 
 ```bash
-sbatch --account=<project> slurm/pull_image.sbatch                      # -> $MYSCRATCH/singularity/af3jax_main.sif
+sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/af3jax:main /scratch/<project>/$USER/singularity
 ```
 
 ## Run
@@ -66,10 +66,11 @@ The 15-run release check runs every run through the image and compares each one 
 It takes one `gpu-dev` node for about 2.5 h, and needs the HK97 test inputs (not distributed) and your own parameters:
 
 ```bash
-A1_DATA=<native tree with inputs_ceiling/, inputs_perf/, ref/> AF3_PARAMS=<dir with af3.bin.zst> \
-AF3JAX_SIF=$MYSCRATCH/singularity/af3jax_main.sif A1_REF=<native tree>/out_A1.50480402 \
-sbatch --account=<project>-gpu slurm/a1audit.sbatch
+sbatch --account=<project>-gpu slurm/a1audit.sbatch A1_DATA=<native tree with inputs_ceiling/, inputs_perf/, ref/> \
+  AF3_PARAMS=<dir with af3.bin.zst> AF3JAX_SIF=<the .sif> A1_REF=<native tree>/out_A1.50480402
 ```
+
+Pass the settings as arguments, as shown. Setonix sets `SBATCH_EXPORT=NONE`, so variables set in front of `sbatch` never reach the job.
 
 Without `AF3JAX_SIF` it audits a native tree (`AF3JAX_W`) instead.
 
