@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.sif
+# AlphaFold 3 wheels are build inputs, not sources (ports/af3jax/container/wheels/README.md)
+ports/*/container/wheels/*.whl
+# never commit model weights or parameters (the AlphaFold 3 parameters' terms forbid redistribution)
+*.bin.zst
+*.npz
+*.ckpt
+*.pt

@@ -1,0 +1,55 @@
+#!/bin/sh
+# af3jax -- entry point of the af3_jax Setonix image (ports/af3jax). It keeps the host's software environment out of the model process and
+# runs the port's own wrapper -- the same scripts/af3jax_predict.sh a native install runs -- on the image's tree, /opt/af3jax.
+# POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV (their Lmod init), which bash would source. Run WITHOUT --rocm.
+#
+#   af3jax predict --input_dir DIR --output_dir DIR [options]   the port's wrapper: setups A / B / C by size, validated defaults
+#                                                               (`af3jax predict --help` lists the options; --dry_run prints the plan)
+#   af3jax check [--no-gpu]        versions, patches, GPUs, and where every GPU library was loaded from (must be the image's)
+#   af3jax version                 provenance: source revision, kit, AlphaFold 3 wheel, ROCm packages
+#   af3jax python ... | shell ...  the image's Python / a shell, in the same clean environment
+#   af3jax help
+#
+# Weights are not in the image. Official AlphaFold 3 parameters: bind their directory and pass --model_dir DIR (or AF3JAX_MODEL_DIR).
+# OpenFold3-ported weights: bind them at /opt/af3jax/weights/p2. Compile cache: the image is read-only, so pass --cache_dir DIR or set
+# AF3JAX_CACHE to a directory on /scratch to reuse compiled programs across jobs (otherwise each run compiles privately).
+set -eu
+
+note() { printf '[af3jax] %s\n' "$*" >&2; }
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` shell function are dropped; Slurm's and the GPU-selection variables (ROCR_VISIBLE_DEVICES) pass through.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT HIP_PATH HSA_PATH ROCM_HOME \
+         HIP_PLATFORM XLA_FLAGS XLA_PYTHON_CLIENT_MEM_FRACTION XLA_PYTHON_CLIENT_ALLOCATOR JAX_COMPILATION_CACHE_DIR BASH_ENV ENV \
+         LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_; do
+  unset "$v" 2>/dev/null || true
+done
+export AF3JAX_W=/opt/af3jax ROCM_PATH=/opt/rocm LD_LIBRARY_PATH=/opt/rocm/lib PYTHONNOUSERSITE=1 PYTHONHASHSEED=0 PYTHONUNBUFFERED=1 \
+       PATH=/opt/af3jax/stockenv/bin:/hmmer/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+
+# 2. Writable caches outside $HOME (1 GB quota on Setonix) and outside the read-only image.
+T=${AF3JAX_TMP:-${TMPDIR:-/tmp}/af3jax-$(id -u)}
+mkdir -p "$T" 2>/dev/null || T=$(mktemp -d)
+export XDG_CACHE_HOME="$T/xdg" TRITON_CACHE_DIR="$T/triton" MPLCONFIGDIR="$T/mpl"
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  predict)
+    exec $CLEAN /bin/bash /opt/af3jax/scripts/af3jax_predict.sh "$@" ;;
+  check)
+    export XLA_FLAGS="--xla_gpu_enable_command_buffer= --xla_gpu_cublas_fallback=false --xla_disable_hlo_passes=triton-softmax-rewriter" \
+           XLA_PYTHON_CLIENT_PREALLOCATE=false AMD_SERIALIZE_COPY=3
+    exec $CLEAN python /opt/af3jax/container/af3jax_check.py "$@" ;;
+  version)
+    cat /opt/af3jax/source.txt /opt/af3jax/kit.txt /opt/af3jax/wheel.txt /opt/af3jax/rocm-packages.txt 2>/dev/null; exit 0 ;;
+  python)
+    exec $CLEAN python "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (af3jax help)"; exit 2 ;;
+esac

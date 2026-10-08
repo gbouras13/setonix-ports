@@ -1,0 +1,26 @@
+setonix-ports
+Copyright 2026 George Bouras and contributors
+
+The scripts, recipes, workflows and documentation in this repository are licensed under the Apache License, Version 2.0 (LICENSE).
+
+CONTAINER IMAGES
+
+The images built from this repository contain third-party software under its own licences; nothing in this repository relicenses it.
+For the af3jax image (ports/af3jax/container/Dockerfile), the main components are:
+  - AlphaFold 3 source code, v3.1.4 as the sokrypton/alphafold3 JAX fork pins it (Copyright 2024 DeepMind Technologies Limited, and
+    the fork's authors): Apache License 2.0. Upstream changed the code licence from CC BY-NC-SA 4.0 to Apache 2.0 on 2026-06-09.
+  - The af3_jax optimisation kit, anthropics/uplifting-biomolecular-modeling (Copyright 2026 Anthropic, PBC): Apache License 2.0,
+    with its own NOTICE, kept in the image at /opt/af3jax/ubm.
+  - JAX, jaxlib and the jax-rocm7 plugin (Apache License 2.0), and the other Python packages of the kit's lock file, each under its
+    own licence.
+  - AMD ROCm 7.2.4 libraries (MIT, BSD and other licences, per package) and the rocm/dev-ubuntu-24.04 base image (Ubuntu packages
+    under their own licences).
+  - CPython 3.12.1 (PSF License), from python-build-standalone.
+  - HMMER 3.4 (BSD 3-Clause), with AlphaFold 3's jackhmmer patch.
+  - Chemical component data derived from the wwPDB Chemical Component Dictionary (CC0 1.0), built into AlphaFold 3's data files.
+
+MODEL PARAMETERS ARE NOT INCLUDED
+
+No image and no file in this repository contains model weights or parameters. The AlphaFold 3 model parameters are available from
+Google DeepMind under the AlphaFold 3 Model Parameters Terms of Use, which forbid redistribution: obtain your own copy and keep it
+private. The OpenFold3-preview2 weights (Apache 2.0, the OpenFold Consortium) are likewise not included.

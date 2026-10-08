@@ -1,0 +1,11 @@
+# Build context = ports/af3jax (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/af3jax
+!container/af3jax_check.py
+!container/prune_rocm_arch.py
+!container/wheels
+!scripts
+!cases
+**/__pycache__
+**/*.pyc
+**/.DS_Store

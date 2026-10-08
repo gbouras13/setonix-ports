@@ -1,0 +1,46 @@
+# Fast checks on every push and pull request (no GPU, no image): shell and Python syntax, ShellCheck errors, JSON, the Dockerfiles'
+# build checks, and each port's own dry-run tests.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Shell syntax
+        run: |
+          git ls-files -z '*.sh' '*.sbatch' | xargs -0 -r -n1 bash -n
+          sh -n ports/af3jax/container/af3jax
+
+      - name: ShellCheck (errors only)
+        run: git ls-files -z '*.sh' '*.sbatch' ports/af3jax/container/af3jax | xargs -0 -r shellcheck --severity=error
+
+      - name: Python syntax
+        run: git ls-files -z '*.py' | xargs -0 -r python3 -m py_compile
+
+      - name: JSON
+        run: git ls-files -z '*.json' | xargs -0 -r -n1 python3 -m json.tool > /dev/null
+
+      - name: Dockerfile build checks
+        run: |
+          for f in $(git ls-files 'ports/*/container/Dockerfile'); do
+            ctx=$(dirname "$(dirname "$f")")
+            echo "== $f (context $ctx)"
+            docker buildx build --check -f "$f" "$ctx"
+          done
+
+      - name: af3jax wrapper decisions
+        run: bash ports/af3jax/tests/test_wrapper.sh
