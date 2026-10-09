@@ -65,10 +65,11 @@ RUN export ROCM_PATH=/opt/rocm HIP_PATH=/opt/rocm HIP_PLATFORM=amd RUSTUP_HOME=/
 # ------------------------------------------------------------------------------------------------ runtime
 FROM ${RUNTIME_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
-# the HIP runtime of AMD's ROCm 7.2.4 apt repository (what the binary links: libamdhip64, libhsa-runtime64, libamd_comgr), GNU OpenMP
+# the HIP runtime of AMD's ROCm 7.2.4 apt repository (what the binary links: libamdhip64, libhsa-runtime64, libamd_comgr), GNU OpenMP and
+# libatomic (GCC's runtime libraries the binary links dynamically, as natively)
 ARG ROCM_VERSION=7.2.4
 RUN apt-get update --quiet \
- && apt-get install --yes --quiet --no-install-recommends ca-certificates curl gpg libgomp1 libbz2-1.0 zlib1g gawk \
+ && apt-get install --yes --quiet --no-install-recommends ca-certificates curl gpg libgomp1 libatomic1 libbz2-1.0 zlib1g gawk \
  && mkdir -p /etc/apt/keyrings \
  && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor > /etc/apt/keyrings/rocm.gpg \
  && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/$ROCM_VERSION noble main" \
