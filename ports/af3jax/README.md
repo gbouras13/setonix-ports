@@ -32,8 +32,13 @@ unchanged. Leave it on: the wrapper warns if it is turned off.
 - It holds an af3_jax tree at `/opt/af3jax`, with the same wrapper and launchers a native install runs.
 - **No weights.** For the official AlphaFold 3 parameters, pass `--model_dir DIR` (a directory holding `af3.bin.zst`). For the
   OpenFold3-preview2 weights converted to AF3 format, bind their directory at `/opt/af3jax/weights/p2`.
-- **Not yet validated on an MI250X.** The native stack is validated. The image's check is `slurm/a1audit.sbatch` in container mode,
-  against the native A1 run (below).
+- **Validated on Setonix** (2026-10-09), image `sha-95747e1`, digest `sha256:10f60297…`:
+  - The container A1 (job 50537745) passes 15 of 15 runs with the expected setup choices, every chain folds, and speed and peak memory
+    match native.
+  - On the warm (second) seed, every run matches native to 0.01–0.13 Å, which is as close as two native runs are.
+  - The first seed varies from run to run, natively too. On the 4-mer, about one first seed in six lands in a less accurate state
+    (1.59 against 1.24 Å to the crystal, pTM 0.51 against 0.54). Native and the container reach the same structures there (FS1, job
+    50560874). For multimers, run several seeds: pTM tracks it, so the ranking favours the better samples.
 
 ```bash
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/af3jax:main /scratch/<project>/$USER/singularity
@@ -63,7 +68,7 @@ singularity exec $SIF af3jax predict --input_dir in/my_complex --output_dir out 
 ## Validate the image (container A1)
 
 The 15-run release check runs every run through the image and compares each one with the native A1's same run (same input, same seeds).
-It takes one `gpu-dev` node for about 2.5 h, and needs the HK97 test inputs (not distributed) and your own parameters:
+It takes one `gpu-dev` node for about 1.5 h (the job asks for 2.5 h), and needs the HK97 test inputs (not distributed) and your own parameters:
 
 ```bash
 sbatch --account=<project>-gpu slurm/a1audit.sbatch A1_DATA=<native tree with inputs_ceiling/, inputs_perf/, ref/> \
