@@ -7,14 +7,16 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 
 | port | model | in this repository |
 |---|---|---|
-| [`af3jax`](ports/af3jax/) | AlphaFold 3 (JAX), one GCD or a whole node | wrapper, launchers, checks, image `ghcr.io/gbouras13/setonix-ports/af3jax` |
-| `openfold3`, `protenix`, `boltz2`, `colabfold`, `opendde`, `mmseqs2-hip`, `proteinmpnn` | | not yet: ported and validated on Setonix, to follow `af3jax` here |
+| [`af3jax`](ports/af3jax/) | AlphaFold 3 (JAX), one GCD or a whole node | wrapper, launchers, checks, image `ghcr.io/gbouras13/setonix-ports/af3jax` (validated) |
+| [`mmseqs2-hip`](ports/mmseqs2-hip/) | MMseqs2's GPU (HIP) build, for `colabfold_search` and any GPU search | image `ghcr.io/gbouras13/setonix-ports/mmseqs2-hip`, GPU test |
+| `colabfold` | ColabFold 1.6.3 with the kit's modes, plus `colabfold_search` on the GPU binary | next |
+| `openfold3`, `protenix`, `boltz2`, `opendde`, `proteinmpnn` | | not yet: ported and validated on Setonix, to follow here |
 
 ## Using an image on Setonix
 
 1. Pull it as a SIF, in a compute job (Pawsey asks for pulls there, not on a login node):
    ```bash
-   sbatch --account=<project> ports/af3jax/slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/af3jax:main
+   sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/af3jax:main /scratch/<project>/$USER/singularity
    ```
 2. Check it on a GPU node: `singularity exec $SIF af3jax check`. It lists the GPUs and checks that every GPU library was loaded from
    the image.

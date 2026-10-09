@@ -19,6 +19,11 @@ For the af3jax image (ports/af3jax/container/Dockerfile), the main components ar
   - HMMER 3.4 (BSD 3-Clause), with AlphaFold 3's jackhmmer patch.
   - Chemical component data derived from the wwPDB Chemical Component Dictionary (CC0 1.0), built into AlphaFold 3's data files.
 
+The mmseqs2-hip image (ports/mmseqs2-hip/container/Dockerfile), and every image that copies its binary, contains:
+  - MMseqs2 (soedinglab/MMseqs2, commit 564f40d8857f4eca4e1dfe100c67c155b1933e70), built from that source by the Dockerfile:
+    GNU General Public License v3.0. The corresponding source is the upstream repository at that commit.
+  - AMD ROCm 7.2.4's HIP runtime packages and the Ubuntu 24.04 base image (packages under their own licences).
+
 MODEL PARAMETERS ARE NOT INCLUDED
 
 No image and no file in this repository contains model weights or parameters. The AlphaFold 3 model parameters are available from

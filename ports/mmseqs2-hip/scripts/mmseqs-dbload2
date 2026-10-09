@@ -1,0 +1,32 @@
+#!/bin/bash
+# mmseqs-dbload2: a drop-in for colabfold_search --mmseqs that runs MMseqs2's database-reading steps with
+# --db-load-mode 2 (mmap only, no touch).
+#
+# Why: without a precomputed .idx index, colabfold_search forces --db-load-mode 0 (colabfold/mmseqs/search.py:95-106).
+# In mode 0 (and 3), expandaln, align, filterresult and result2msa first "touch" the whole target database
+# (touch = preloadMode != PRELOAD_MODE_MMAP, e.g. src/util/expandaln.cpp:107). That is one thread reading 160-220 GB
+# of _seq/_aln/_seq_h sequentially, ~0.9 GB/s from Lustre, and again in every module unless the pages are still cached.
+# Mode 2 skips the touch and faults in only the pages the alignments need. For `search` it propagates to the
+# workflow's internal align steps, which otherwise touch the padded prefilter database in every iteration.
+# Results are unchanged: the load mode only changes how the files are read.
+#
+# usage: MMSEQS_REAL=/path/to/mmseqs colabfold_search --mmseqs /path/to/mmseqs-dbload2 ...
+REAL=${MMSEQS_REAL:?set MMSEQS_REAL to the real mmseqs binary}
+case "${1:-}" in
+    search|expandaln|align|filterresult|result2msa)
+        args=()
+        seen=0
+        while [ $# -gt 0 ]; do
+            if [ "$1" = "--db-load-mode" ] && [ $# -ge 2 ]; then
+                args+=(--db-load-mode 2); seen=1; shift 2
+            else
+                args+=("$1"); shift
+            fi
+        done
+        [ $seen -eq 1 ] || args+=(--db-load-mode 2)
+        exec "$REAL" "${args[@]}"
+        ;;
+    *)
+        exec "$REAL" "$@"
+        ;;
+esac

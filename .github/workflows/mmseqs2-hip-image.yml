@@ -1,27 +1,27 @@
-# Builds the af3_jax image (ports/af3jax/container/Dockerfile) and pushes it to ghcr.io/<owner>/<repo>/af3jax.
+# Builds the mmseqs2-hip image (ports/mmseqs2-hip/container/Dockerfile: MMseqs2's GPU build for gfx90a) and pushes it to
+# ghcr.io/<owner>/<repo>/mmseqs2-hip. The colabfold image copies its binary from here (by digest).
 #   push to main (paths below)   -> :main and :sha-<short>
 #   pull request                 -> build only, nothing pushed
 #   manual (Actions tab)         -> as for the branch it runs on
-# Releases are not built here: af3jax-release.yml retags an image that passed the Setonix checks (:3.1.4-1, :3.1.4, :latest).
-# Setonix pulls it as a SIF in a compute job: slurm/pull_image.sbatch. Images cannot be built on Setonix.
-name: af3jax image
+# Two stages (compiler image, slim runtime): the layer cache, the build stage's included, lives in :buildcache.
+name: mmseqs2-hip image
 
 on:
   push:
     branches: [main]
     paths:
-      - ports/af3jax/container/**
-      - ports/af3jax/scripts/**
-      - ports/af3jax/cases/**
-      - ports/af3jax/.dockerignore
-      - .github/workflows/af3jax-image.yml
+      - ports/mmseqs2-hip/container/**
+      - ports/mmseqs2-hip/scripts/**
+      - ports/mmseqs2-hip/tests/**
+      - ports/mmseqs2-hip/.dockerignore
+      - .github/workflows/mmseqs2-hip-image.yml
   pull_request:
     paths:
-      - ports/af3jax/container/**
-      - ports/af3jax/scripts/**
-      - ports/af3jax/cases/**
-      - ports/af3jax/.dockerignore
-      - .github/workflows/af3jax-image.yml
+      - ports/mmseqs2-hip/container/**
+      - ports/mmseqs2-hip/scripts/**
+      - ports/mmseqs2-hip/tests/**
+      - ports/mmseqs2-hip/.dockerignore
+      - .github/workflows/mmseqs2-hip-image.yml
   workflow_dispatch:
 
 permissions:
@@ -29,7 +29,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: af3jax-image-${{ github.ref }}
+  group: mmseqs2-hip-image-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -37,8 +37,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     steps:
-      # The ROCm step installs about 17 GB before the gfx90a prune, and the runner starts with far less free on /. Remove the
-      # preinstalled toolchains this build never uses, then move Docker's storage (and with it BuildKit's) to the larger disk.
+      # The build stage is AMD's ROCm development image plus the compiler packages. Remove the runner's preinstalled toolchains this build
+      # never uses, and move Docker's storage (and with it BuildKit's) to the larger disk if there is one.
       - name: Make disk space
         run: |
           df -h / /mnt 2>/dev/null || df -h /
@@ -66,7 +66,7 @@ jobs:
           persist-credentials: false
 
       - name: Image name
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/af3jax" >> "$GITHUB_ENV"
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/mmseqs2-hip" >> "$GITHUB_ENV"
 
       - name: Tags and labels
         id: meta
@@ -78,8 +78,8 @@ jobs:
             type=ref,event=pr
             type=sha,prefix=sha-,format=short,enable=${{ github.ref == 'refs/heads/main' }}
           labels: |
-            org.opencontainers.image.title=af3jax-setonix
-            org.opencontainers.image.description=Stock AlphaFold 3 (JAX) with the Setonix port's wrapper for AMD MI250X (gfx90a), ROCm 7.2.4, jax 0.10.2. No weights inside.
+            org.opencontainers.image.title=mmseqs2-hip-setonix
+            org.opencontainers.image.description=MMseqs2 (master 564f40d8) with its HIP GPU backend for AMD MI250X (gfx90a), ROCm 7.2.4.
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -91,24 +91,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Single-stage Dockerfile, so the inline cache in :main covers every layer: a change to scripts/ re-runs only the last step.
       # One plain manifest (no attestations), the simplest thing for `singularity pull` to read.
       - name: Build and push
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: ports/af3jax
-          file: ports/af3jax/container/Dockerfile
+          context: ports/mmseqs2-hip
+          file: ports/mmseqs2-hip/container/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            PRUNE_GPU_ARCH=gfx90a
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
             SOURCE_REV=${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:main
-          cache-to: type=inline
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:buildcache,mode=max', env.IMAGE) || '' }}
           provenance: false
           sbom: false
 

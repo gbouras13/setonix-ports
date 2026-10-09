@@ -1,0 +1,6 @@
+# Build context = ports/mmseqs2-hip (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/mmseqs
+!scripts/mmseqs-dbload2
+!tests
+**/.DS_Store

@@ -41,7 +41,7 @@ unchanged. Leave it on: the wrapper warns if it is turned off.
     50560874). For multimers, run several seeds: pTM tracks it, so the ranking favours the better samples.
 
 ```bash
-sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/af3jax:main /scratch/<project>/$USER/singularity
+sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/af3jax:main /scratch/<project>/$USER/singularity   # from the repository root
 ```
 
 ## Run
@@ -71,7 +71,7 @@ The 15-run release check runs every run through the image and compares each one 
 It takes one `gpu-dev` node for about 1.5 h (the job asks for 2.5 h), and needs the HK97 test inputs (not distributed) and your own parameters:
 
 ```bash
-sbatch --account=<project>-gpu slurm/a1audit.sbatch A1_DATA=<native tree with inputs_ceiling/, inputs_perf/, ref/> \
+sbatch --account=<project>-gpu ports/af3jax/slurm/a1audit.sbatch A1_DATA=<native tree with inputs_ceiling/, inputs_perf/, ref/> \
   AF3_PARAMS=<dir with af3.bin.zst> AF3JAX_SIF=<the .sif> A1_REF=<native tree>/out_A1.50480402
 ```
 
@@ -89,5 +89,5 @@ Without `AF3JAX_SIF` it audits a native tree (`AF3JAX_W`) instead.
 | `scripts/perf_cmp.py`, `scripts/compare_structs.py` | same-seed comparison of runs: structures, confidences, timings |
 | `scripts/g4_gemm.py`, `scripts/g5_autotune.py`, `scripts/pl_test.py`, `cases/` | the hipBLASLt investigation's tools and cases |
 | `container/` | Dockerfile, entry point `af3jax`, self-check, architecture prune |
-| `slurm/pull_image.sbatch`, `slurm/a1audit.sbatch` | pull the image on Setonix; the release check |
+| `slurm/a1audit.sbatch` (pull the image with the repository's `slurm/pull_image.sbatch`) | the release check |
 | `tests/test_wrapper.sh` | the wrapper's decision table, as a dry run (CI) |

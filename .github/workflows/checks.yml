@@ -20,13 +20,24 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Find the shell scripts (by their first line)
+        run: |
+          : > bash.list; : > sh.list
+          git ls-files | while IFS= read -r f; do
+            case "$(head -n1 "$f" 2>/dev/null)" in
+              '#!/bin/bash'*|'#!/usr/bin/env bash'*) echo "$f" >> bash.list ;;
+              '#!/bin/sh'*) echo "$f" >> sh.list ;;
+            esac
+          done
+          echo "bash: $(wc -l < bash.list), sh: $(wc -l < sh.list)"; cat bash.list sh.list
+
       - name: Shell syntax
         run: |
-          git ls-files -z '*.sh' '*.sbatch' | xargs -0 -r -n1 bash -n
-          sh -n ports/af3jax/container/af3jax
+          while IFS= read -r f; do bash -n "$f"; done < bash.list
+          while IFS= read -r f; do sh -n "$f"; done < sh.list
 
       - name: ShellCheck (errors only)
-        run: git ls-files -z '*.sh' '*.sbatch' ports/af3jax/container/af3jax | xargs -0 -r shellcheck --severity=error
+        run: cat bash.list sh.list | tr '\n' '\0' | xargs -0 -r shellcheck --severity=error
 
       - name: Python syntax
         run: git ls-files -z '*.py' | xargs -0 -r python3 -m py_compile

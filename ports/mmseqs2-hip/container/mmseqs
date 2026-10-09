@@ -1,0 +1,9 @@
+#!/bin/sh
+# mmseqs -- entry point of the mmseqs2-hip image: MMseqs2's GPU (HIP) build, with the host's loader settings kept out so that the
+# image's ROCm 7.2.4 runtime is the one loaded. POSIX sh: Pawsey's singularity modules export BASH_ENV, which bash would source.
+# Run WITHOUT --rocm. GPU search: mmseqs search QDB TARGET_PADDED RES TMP --gpu 1 (targets in MMseqs2's padded GPU format).
+for v in LD_PRELOAD LD_AUDIT ROCM_PATH ROCM_HOME HIP_PATH HSA_PATH HIP_PLATFORM BASH_ENV ENV; do
+  unset "$v" 2>/dev/null || true
+done
+export LD_LIBRARY_PATH=/opt/rocm/lib
+exec /opt/mmseqs/bin/mmseqs "$@"
