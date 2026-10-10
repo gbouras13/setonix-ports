@@ -1,0 +1,76 @@
+#!/bin/sh
+# proteinmpnn -- entry point of the ProteinMPNN Setonix image (ports/proteinmpnn). It keeps the host's software environment out and runs
+# the port's own scripts on the image's tree, /opt/proteinmpnn: the same tree a native install has (venv/, kit/, ProteinMPNN/, scripts/),
+# with both weight sets inside. POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV, which bash would source.
+# Run WITHOUT --rocm.
+#
+#   proteinmpnn design --mode off|exact --input DIR|parsed.jsonl --out OUT [upstream options]
+#                                  one GCD. off = stock protein_mpnn_run.py; exact = the kit's worker, byte-identical to stock here
+#   proteinmpnn dp --mode off|exact --input DIR --out OUT [--gcds 0,..,7] [--per-gcd K] [upstream options]
+#                                  the same pass spread over a node's GCDs (scripts/pms_dp.py). exact stays byte-identical to ONE stock
+#                                  process whatever the worker count; off restarts the seed in each shard, so its designs are valid
+#                                  samples but not a single stock run's bytes
+#   proteinmpnn compare A B        byte identity and per-design differences between two output directories (tools/pms_compare.py)
+#   proteinmpnn check [--no-gpu]   versions, pins, weights, GPUs, a design on upstream's 429-residue example, and where every GPU
+#                                  library was loaded from
+#   proteinmpnn kit ...            the kit's own run.sh, unpatched: `kit check --mode exact` (a dry run, gates the mode on this
+#                                  box), `kit warm --mode exact`, `kit design --mode off ...`
+#   proteinmpnn version | python ... | shell ... | help
+#
+# Nothing else is needed: the weights ship in the image (upstream's repository carries them; MIT). Inputs are PDB files, output is a
+# directory. Setonix starts every job from a fresh login environment (SBATCH_EXPORT=NONE), so set what you need inside the job script.
+# Scratch for temporaries and the one compiled Triton kernel: PMS_LOCAL (default a per-user directory under TMPDIR, so each job compiles
+# it again, ~20 s); point MODEL_OPT_JIT_ROOT at /scratch to keep it between jobs.
+set -eu
+
+note() { printf '[proteinmpnn] %s\n' "$*" >&2; }
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` function are dropped. Slurm's variables, ROCR_VISIBLE_DEVICES and the port's PMS_* / MODEL_OPT_* words pass
+#    through. The kit strips PROTEINMPNN_* / MPNN_* / SELFTEST_* / PYTORCH_CUDA_ALLOC_CONF / CUBLAS_WORKSPACE_CONFIG from the stock
+#    subprocess itself (stock/PINS.json must_be_absent_prefixes), so those are left alone here.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT HIP_PATH HSA_PATH ROCM_HOME \
+         HIP_PLATFORM BASH_ENV ENV LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_; do
+  unset "$v" 2>/dev/null || true
+done
+W=/opt/proteinmpnn
+export PMS_ROOT=$W ROCM_PATH=/opt/rocm PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+       PATH=$W/scripts/bin:$W/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+
+# 2. Writable scratch outside $HOME (1 GB quota on Setonix) and outside the read-only image. pms-env.sh keys TRITON_CACHE_DIR under
+#    MODEL_OPT_JIT_ROOT; both default here, and both are honoured if already set.
+T=${PMS_LOCAL:-${TMPDIR:-/tmp}/pms-$(id -u)}
+mkdir -p "$T" 2>/dev/null || T=$(mktemp -d)
+export PMS_LOCAL="$T" MODEL_OPT_JIT_ROOT="${MODEL_OPT_JIT_ROOT:-$T/jit}"
+
+# 3. Every verb below sources the port's own scripts/pms-env.sh first: the venv, the nvidia-smi shim (the kit identifies the GPU with it
+#    alone), the kit and checkout paths, and DEBUG_CLR_GRAPH_PACKET_CAPTURE=0, without which ROCm 7.2 corrupts the heap replaying the
+#    exact worker's decode graph. It returns 97 if the tree is incomplete.
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  design)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" || exit 97; exec bash "$1/scripts/pms-run.sh" design "${@:2}"' _ "$W" "$@" ;;
+  dp)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" || exit 97; exec python "$1/scripts/pms_dp.py" "${@:2}"' _ "$W" "$@" ;;
+  compare)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" > /dev/null || exit 97; exec python "$1/tools/pms_compare.py" "${@:2}"' _ "$W" "$@" ;;
+  kit)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" || exit 97; exec bash "$1/kit/proteinmpnn/run.sh" "${@:2}"' _ "$W" "$@" ;;
+  check)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" > /dev/null 2>&1 || exit 97
+                              exec python "$1/container/proteinmpnn_check.py" "${@:2}"' _ "$W" "$@" ;;
+  version)
+    cat $W/source.txt $W/kit.txt $W/mpnn.txt $W/rocm-packages.txt 2>/dev/null
+    sed -n 's/^\(torch\|triton-rocm\|numpy\)==/\1 /p' $W/environment/image-freeze.txt 2>/dev/null
+    exit 0 ;;
+  python)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" > /dev/null 2>&1; exec python "${@:2}"' _ "$W" "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (proteinmpnn help)"; exit 2 ;;
+esac

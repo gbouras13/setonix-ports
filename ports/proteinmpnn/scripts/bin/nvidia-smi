@@ -1,0 +1,89 @@
+#!/bin/bash
+# nvidia-smi shim for AMD GCDs on Setonix (MI250X, gfx90a). NOT NVIDIA's tool: it answers only the queries the ProteinMPNN
+# kit and opt_core make, from the KFD topology in sysfs (no torch, no ROCm tools, no device opened):
+#
+#   nvidia-smi --query-gpu=<field,...> --format=csv[,noheader][,nounits]     one line per GPU the process can see
+#   nvidia-smi -L                                                             "GPU <i>: <name> (UUID: GPU-<hex>)"
+#
+# The kit's call (proteinmpnn_opt/stack.py gpu_info; copied from the Boltz-2 port's shim, which also answers opt_core's forms):
+#   --query-gpu=name,memory.total,compute_cap --format=csv,noheader,nounits
+# Without an nvidia-smi the kit sees no GPU: the exact line is then refused at activation (its CUDA-graph levers, `partial=`).
+#
+# What it reports, and why:
+#   name          "AMD Instinct MI250X" for gfx_target_version 90010, else "AMD GPU gfx<version>"
+#   memory.total  the GCD's VRAM banks in MiB (65,520 on an MI250X GCD; [MiB] unit unless nounits)
+#   compute_cap   ${PMS_SHIM_CC:-9.0}: the tuple torch.cuda.get_device_capability() returns on gfx90a, so the kit's
+#                 nvidia-smi view and the opt_core providers' torch view agree (both read H100-class 9.0)
+#   driver_version  /sys/module/amdgpu/version, else "amdgpu"
+#   index, uuid   position among the visible GCDs; GPU-<KFD unique_id in hex>
+#   anything else "[N/A]"
+# Visibility: GCDs in KFD node order (the ROCr agent order), narrowed by ROCR_VISIBLE_DEVICES when it lists indices. Like
+# nvidia-smi, it ignores CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES (the kit narrows by CUDA_VISIBLE_DEVICES itself).
+set -u
+Q=""; FMT="csv"; LIST=0
+for a in "$@"; do
+  case "$a" in
+    --query-gpu=*) Q=${a#--query-gpu=} ;;
+    --format=*)    FMT=${a#--format=} ;;
+    -L|--list-gpus) LIST=1 ;;
+  esac
+done
+TOPO=${PMS_SHIM_TOPO:-/sys/class/kfd/kfd/topology/nodes}   # overridable for tests only
+nodes=()
+for n in $(ls "$TOPO" 2>/dev/null | sort -n); do
+  p="$TOPO/$n/properties"
+  v=$(awk '$1=="gfx_target_version"{print $2}' "$p" 2>/dev/null)
+  [ -n "$v" ] && [ "$v" != 0 ] && nodes+=("$n")
+done
+if [ -n "${ROCR_VISIBLE_DEVICES:-}" ] && [[ "$ROCR_VISIBLE_DEVICES" =~ ^[0-9,\ ]+$ ]]; then
+  sel=()
+  IFS=, read -ra want <<< "$ROCR_VISIBLE_DEVICES"
+  for w in "${want[@]}"; do w=${w// /}; [ -n "$w" ] && [ "$w" -lt "${#nodes[@]}" ] && sel+=("${nodes[$w]}"); done
+  nodes=("${sel[@]+"${sel[@]}"}")
+fi
+if [ "${#nodes[@]}" -eq 0 ]; then
+  echo "No devices were found" >&2
+  exit 6
+fi
+noheader=0; nounits=0
+case ",$FMT," in *,noheader,*) noheader=1 ;; esac
+case ",$FMT," in *,nounits,*) nounits=1 ;; esac
+drv=$(cat /sys/module/amdgpu/version 2>/dev/null || true); drv=${drv:-amdgpu}
+field() {   # field <name> <kfd node> <index>
+  local f=$1 n=$2 i=$3 p="$TOPO/$2/properties" v b mib
+  case "$f" in
+    index) echo "$i" ;;
+    uuid)  printf 'GPU-%016x\n' "$(awk '$1=="unique_id"{print $2}' "$p")" ;;
+    name|gpu_name)
+      v=$(awk '$1=="gfx_target_version"{print $2}' "$p")
+      if [ "$v" = 90010 ]; then echo "AMD Instinct MI250X"; else echo "AMD GPU gfx$v"; fi ;;
+    memory.total)
+      b=0
+      for m in "$TOPO/$n"/mem_banks/*/properties; do
+        [ -f "$m" ] || continue
+        b=$(( b + $(awk '$1=="size_in_bytes"{print $2}' "$m") ))
+      done
+      mib=$(( b / 1048576 ))
+      if [ "$nounits" = 1 ]; then echo "$mib"; else echo "$mib MiB"; fi ;;
+    compute_cap) echo "${PMS_SHIM_CC:-9.0}" ;;
+    driver_version) echo "$drv" ;;
+    *) echo "[N/A]" ;;
+  esac
+}
+i=0
+if [ "$LIST" = 1 ] && [ -z "$Q" ]; then
+  for n in "${nodes[@]}"; do echo "GPU $i: $(field name "$n" $i) (UUID: $(field uuid "$n" $i))"; i=$((i + 1)); done
+  exit 0
+fi
+[ -n "$Q" ] || { echo "nvidia-smi shim (pms): only --query-gpu=... --format=csv[,noheader][,nounits] and -L are answered" >&2; exit 2; }
+IFS=, read -ra F <<< "$Q"
+if [ "$noheader" = 0 ]; then
+  ( IFS=,; echo "${F[*]}" ) | sed 's/,/, /g'
+fi
+for n in "${nodes[@]}"; do
+  out=()
+  for f in "${F[@]}"; do out+=("$(field "${f// /}" "$n" $i)"); done
+  ( IFS=,; echo "${out[*]}" ) | sed 's/,/, /g'
+  i=$((i + 1))
+done
+exit 0

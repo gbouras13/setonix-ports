@@ -1,0 +1,12 @@
+# Build context = ports/proteinmpnn (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/proteinmpnn
+!container/proteinmpnn_check.py
+!container/prune_rocm_arch.py
+!environment
+!scripts
+!tools
+!tests
+**/__pycache__
+**/*.pyc
+**/.DS_Store

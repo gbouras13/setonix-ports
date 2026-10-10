@@ -10,7 +10,8 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 | [`af3jax`](ports/af3jax/) | AlphaFold 3 (JAX), one GCD or a whole node | wrapper, launchers, checks, image `ghcr.io/gbouras13/setonix-ports/af3jax` (validated) |
 | [`mmseqs2-hip`](ports/mmseqs2-hip/) | MMseqs2's GPU (HIP) build, for `colabfold_search` and any GPU search | image `ghcr.io/gbouras13/setonix-ports/mmseqs2-hip`, GPU test |
 | [`colabfold`](ports/colabfold/) | ColabFold 1.6.3 with the kit's modes, plus `colabfold_search` on the GPU binary | image `ghcr.io/gbouras13/setonix-ports/colabfold`, validation job |
-| `openfold3`, `protenix`, `boltz2`, `opendde`, `proteinmpnn` | | not yet: ported and validated on Setonix, to follow here |
+| [`proteinmpnn`](ports/proteinmpnn/) | ProteinMPNN inverse folding, byte-identical to stock and 11.6x faster per GCD | runner, boot patch, data-parallel driver, image `ghcr.io/gbouras13/setonix-ports/proteinmpnn`, validation job |
+| `openfold3`, `protenix`, `boltz2`, `opendde` | | not yet: ported and validated on Setonix, to follow here |
 
 ## Using an image on Setonix
 
@@ -24,7 +25,7 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 
 - Load `singularity/4.1.0-nohost`. It binds `/scratch`, `/software` and `/data/references` into the container.
 - Never add `--rocm`. It binds the host's ROCm 6.3.0 libraries, whose sonames match the image's 7.2.4 ones.
-- No weights are inside any image. Bind your own.
+- No weights are inside any image, except `proteinmpnn`, whose weights are part of the upstream repository (MIT). Bind your own.
 
 ## How the images are built
 

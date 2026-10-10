@@ -1,0 +1,22 @@
+# The native ProteinMPNN port's venv, frozen (/scratch/pawsey1018/gbouras/proteinmpnn-setonix, logs/venv-freeze.txt, 2026-10-10).
+# Installed with --no-deps, so every version is the one the port validated on gfx90a, and nothing is resolved at build time.
+#
+# torch and triton-rocm come from download.pytorch.org/whl/rocm7.2 (PyPI holds no +rocm7.2 build); the rest from PyPI.
+# NOT here, and installed separately by the Dockerfile from the kit's own clone: opt_core and proteinmpnn_opt (editable, --no-deps).
+torch==2.14.0+rocm7.2
+triton-rocm==3.8.0
+numpy==1.26.4
+filelock==4.0.12
+fsspec==2026.9.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+mpmath==1.3.0
+networkx==3.6.1
+sympy==1.14.0
+typing_extensions==4.16.0
+# the kit's CPU tests (run.sh selftest) and their dependencies
+pytest==9.1.1
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
