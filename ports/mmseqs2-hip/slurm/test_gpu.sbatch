@@ -2,6 +2,7 @@
 #SBATCH --job-name=mmseqs2-hip-test
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
+#SBATCH --gres=gpu:8
 #SBATCH --exclusive
 #SBATCH --time=00:45:00
 #SBATCH --output=mmseqs2-hip-test.%j.out
