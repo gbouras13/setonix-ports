@@ -2,7 +2,7 @@
 #   push to main (paths below)   -> :main and :sha-<short>
 #   pull request                 -> build only, nothing pushed
 #   manual (Actions tab)         -> as for the branch it runs on
-# Releases are not built here: af3jax-release.yml retags an image that passed the Setonix checks (:3.1.4-1, :3.1.4, :latest).
+# Releases are not built here: release.yml retags an image that passed the Setonix checks (:3.1.4-1, :3.1.4, :latest).
 # Setonix pulls it as a SIF in a compute job: slurm/pull_image.sbatch. Images cannot be built on Setonix.
 name: af3jax image
 
