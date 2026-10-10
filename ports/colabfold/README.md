@@ -20,7 +20,14 @@ freeze) and scripts. The evidence is in `af3-setonix/COLABFOLD_PORT.md`.
 - **No weights.** By default it reads Pawsey's AlphaFold2 parameters,
   `/scratch/references/colabfold_jun2026/database/alphafold2_multimer_v3`; `COLABFOLD_OPT_DATA_DIR` names another copy.
 - **Databases** for `colabfold search` are Pawsey's ColabFold databases (`COLABFOLD_DB`), already GPU-padded.
-- **Not yet validated on an MI250X.** The image's check is `slurm/validate.sbatch` (below).
+- **Validated on Setonix** (2026-10-10), image `sha-49a03af`, digest `sha256:3ad767aa…`:
+  - `colabfold check` passes on all 8 GCDs, including an MMseqs2 search on the GPU (job 50596116).
+  - The native bitwise check's four predictions (1BRS and the HK97 trimer, `off` and `exact`) are byte-identical to the native
+    outputs: 12 of 12 files (job 50596116).
+  - `colabfold search` gives byte-identical MSAs to the native `msa_gpu.sbatch` for 246 phage proteins with templates: 492 of 492 a3m
+    and m8 files, in 1,099 s against the native 1,076 s (job 50604344).
+  - The check and the predictions ran on the previous build (`sha256:39a89a04…`). It differs from this one in two files only:
+    `cf-search.sh`, which got the search fix, and the commit line.
 
 ```bash
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/colabfold:main /scratch/<project>/$USER/singularity
@@ -56,10 +63,12 @@ singularity exec $SIF colabfold predict --mode fast msas/ out/ --num-recycle 3  
 
 ## Validate the image
 
-`slurm/validate.sbatch` takes one GPU node for about 30 minutes. It checks three things:
+`slurm/validate.sbatch` takes one GPU node for about 40 minutes, half of it the two MSA runs. It checks three things:
 - `colabfold check` on all 8 GCDs;
 - the native bitwise check's four predictions, byte for byte against the native outputs (job 50480325);
 - MSAs for 246 phage proteins with templates, natively and through the image, compared file by file.
+
+`PARTS=check,pred,msa` picks the sections. `REF_MSA=<dir>` compares against an earlier native MSA run instead of making a new one.
 
 ```bash
 sbatch --account=<project>-gpu ports/colabfold/slurm/validate.sbatch SIF=<the .sif> OUT=<dir> NATIVE_W=<native tree> \
