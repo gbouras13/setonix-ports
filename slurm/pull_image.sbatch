@@ -16,8 +16,8 @@
 #     DEST_DIR  default $MYSCRATCH/singularity. On /scratch the SIF is purged 21 days after it was last read; it is one file, so
 #               rerunning this job brings it back. $MYSOFTWARE/singularity is not purged, if your quota has room (~5 GB). $MYSCRATCH
 #               follows your DEFAULT project: if the image belongs elsewhere, give the directory (/scratch/<project>/$USER/singularity).
-# Then: the image's provenance and its own self-check without a GPU (af3jax check / colabfold check --no-gpu; mmseqs version). The GPU
-# check runs in a GPU job (af3jax check, colabfold check; mmseqs2-hip: ports/mmseqs2-hip/slurm/test_gpu.sbatch).
+# Then: the image's provenance and its own self-check without a GPU (af3jax / colabfold / proteinmpnn check --no-gpu; mmseqs version).
+# The GPU check runs in a GPU job (af3jax check, colabfold check, proteinmpnn check; mmseqs2-hip: ports/mmseqs2-hip/slurm/test_gpu.sbatch).
 set -euo pipefail
 IMAGE=${1:?usage: sbatch pull_image.sbatch IMAGE [DEST_DIR]}
 DEST=${2:-${MYSCRATCH:?MYSCRATCH is not set}/singularity}
@@ -49,6 +49,6 @@ singularity inspect --labels "$SIF" | grep -E "org.opencontainers.image.(title|s
 singularity exec "$SIF" sh -c 'cat /opt/*/source.txt /opt/*/kit.txt /opt/*/wheel.txt /opt/*/build.txt 2>/dev/null' || true
 
 echo; echo "=== self-check without a GPU ==="
-singularity exec "$SIF" sh -c 'for c in af3jax colabfold; do command -v "$c" > /dev/null && exec "$c" check --no-gpu; done
+singularity exec "$SIF" sh -c 'for c in af3jax colabfold proteinmpnn; do command -v "$c" > /dev/null && exec "$c" check --no-gpu; done
                                 command -v mmseqs > /dev/null && exec mmseqs version; echo "no known entry point"; exit 1'
 echo; echo "SIF ready: $SIF   (run it without --rocm)"
