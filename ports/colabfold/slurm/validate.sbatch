@@ -10,7 +10,9 @@
 # The colabfold image against the native port, on one Setonix GPU node (8 MI250X GCDs, the node's NVMe booked for the databases).
 #   sbatch --account=<project>-gpu validate.sbatch SIF=<the .sif> OUT=<dir> NATIVE_W=<the native colabfold-setonix tree> \
 #          REF_PRED=<the native bitwise check's output dir> NATIVE_MMSEQS=<dir with the native bin/mmseqs, mmseqs-dbload2, msa_gpu.sbatch> \
-#          [DB=<ColabFold database root>]                         (arguments, not variables: Setonix sets SBATCH_EXPORT=NONE)
+#          [DB=<ColabFold database root>] [PARTS=check,pred,msa] [REF_MSA=<a native MSA directory>]
+#   (arguments, not variables: Setonix sets SBATCH_EXPORT=NONE). PARTS picks the sections (default all three). REF_MSA compares the image's
+#   MSAs with a native run already made (e.g. an earlier job's msa_native) instead of running msa_gpu.sbatch again.
 # 1. `colabfold check` on all 8 GCDs: devices, a matmul each, every GPU library from the image, the nvidia-smi shim, MMseqs2 on the GPU.
 # 2. Predictions, byte for byte against REF_PRED (the native bitwise check, job 50480325): 1BRS off and exact (2 models), the HK97 trimer
 #    off and exact (1 model); XLA's deterministic flags, copy-only serialisation, seed 0, 3 recycles. One GCD each, all at once; then the
@@ -20,17 +22,30 @@
 set -uo pipefail
 for a in "$@"; do
   case "$a" in
-    SIF=*|OUT=*|NATIVE_W=*|REF_PRED=*|NATIVE_MMSEQS=*|DB=*) export "${a?}" ;;
-    *) echo "unknown argument '$a': SIF= OUT= NATIVE_W= REF_PRED= NATIVE_MMSEQS= DB="; exit 2 ;;
+    SIF=*|OUT=*|NATIVE_W=*|REF_PRED=*|NATIVE_MMSEQS=*|DB=*|PARTS=*|REF_MSA=*) export "${a?}" ;;
+    *) echo "unknown argument '$a': SIF= OUT= NATIVE_W= REF_PRED= NATIVE_MMSEQS= DB= PARTS= REF_MSA="; exit 2 ;;
   esac
 done
-: "${SIF:?SIF=}" "${OUT:?OUT=}" "${NATIVE_W:?NATIVE_W=}" "${REF_PRED:?REF_PRED=}" "${NATIVE_MMSEQS:?NATIVE_MMSEQS=}"
+PARTS=${PARTS:-check,pred,msa}
+has() { case ",$PARTS," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+: "${SIF:?SIF=}" "${OUT:?OUT=}"
+NEED=("$SIF")
+if has pred; then
+  : "${NATIVE_W:?NATIVE_W=}" "${REF_PRED:?REF_PRED=}"
+  NEED+=("$NATIVE_W/inputs/hk97/hk97_k3.a3m" "$REF_PRED/D1_off_det_A/out" "$REF_PRED/D2_exact_det/out" "$REF_PRED/D3_off_det_hk97_A/out"
+         "$REF_PRED/D4_exact_det_hk97/out")
+fi
+if has msa; then
+  if [ -n "${REF_MSA:-}" ]; then NEED+=("$REF_MSA")
+  else
+    : "${NATIVE_W:?NATIVE_W=}" "${NATIVE_MMSEQS:?NATIVE_MMSEQS= (or REF_MSA=)}"
+    NEED+=("$NATIVE_W/venv/bin/colabfold_search" "$NATIVE_MMSEQS/bin/mmseqs" "$NATIVE_MMSEQS/mmseqs-dbload2" "$NATIVE_MMSEQS/msa_gpu.sbatch")
+  fi
+fi
 DB=${DB:-/scratch/references/colabfold_jun2026/database}
 O=$OUT/validate.${SLURM_JOB_ID:-local}
 mkdir -p "$O" && cd "$O" || exit 3
-for f in "$SIF" "$NATIVE_W/venv/bin/colabfold_search" "$NATIVE_W/inputs/hk97/hk97_k3.a3m" "$NATIVE_MMSEQS/bin/mmseqs" "$NATIVE_MMSEQS/mmseqs-dbload2" \
-         "$NATIVE_MMSEQS/msa_gpu.sbatch" "$REF_PRED/D1_off_det_A/out" "$REF_PRED/D2_exact_det/out" "$REF_PRED/D3_off_det_hk97_A/out" \
-         "$REF_PRED/D4_exact_det_hk97/out"; do
+for f in "${NEED[@]}"; do
   [ -e "$f" ] || { echo "MISSING: $f"; exit 3; }
 done
 module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
@@ -40,11 +55,14 @@ echo "=== node $(hostname)  job ${SLURM_JOB_ID:-?}  $(date)  image $SIF ($(du -h
 "${C[@]}" version | sed 's/^/  /'
 t0=$SECONDS; cat "$SIF" > /dev/null; echo "pre-read the image: $((SECONDS - t0)) s"
 
+if has check; then
 echo; echo "=== 1. colabfold check (all GCDs) ==="
 "${C[@]}" check > check.log 2>&1; rc=$?
 grep -E "^\[check\] (versions|pins|devices|matmul|shim|mmseqs|libs|driver|FAIL|PASS)" check.log | cut -c1-200
 [ $rc -eq 0 ] || { echo "CHECK FAILED (rc $rc): see $O/check.log"; tail -20 check.log; }
+fi
 
+if has pred; then
 echo; echo "=== 2. predictions against the native bitwise check ==="
 IN1=/opt/colabfold/kit/colabfold/tests/inputs/1BRS_AD.a3m      # inside the image (the kit's own test input)
 IN3=$NATIVE_W/inputs/hk97/hk97_k3.a3m
@@ -76,26 +94,35 @@ for pair in D1_off_det:D1_off_det_A D2_exact_det:D2_exact_det D3_off_det_hk97:D3
   "${C[@]}" python /opt/colabfold/tools/cf_outputs.py compare "$REF_PRED/$ref/out" "$O/$ours/out" 2>&1 | sed 's/^/   /' | head -8
 done
 echo "PREDICTIONS: $same files byte-identical to the native run, $diff different or missing"
+fi
 
-echo; echo "=== 3. MSAs: native msa_gpu.sbatch, then the image's colabfold search (246 SAOMS1 proteins, templates) ==="
+if has msa; then
+echo; echo "=== 3. MSAs: native msa_gpu.sbatch (or REF_MSA), then the image's colabfold search (246 SAOMS1 proteins, templates) ==="
 Q=$O/SAOMS1_phanotate.faa
 singularity exec "$SIF" cat /opt/colabfold/tests/SAOMS1_phanotate.faa > "$Q"
-t0=$SECONDS
-( export MMSEQS=$NATIVE_MMSEQS/bin/mmseqs MMSEQS_WRAP=$NATIVE_MMSEQS/mmseqs-dbload2 CFSEARCH=$NATIVE_W/venv/bin/colabfold_search COLABFOLD_DB=$DB
-  bash "$NATIVE_MMSEQS/msa_gpu.sbatch" "$Q" "$O/msa_native" --use-templates 1 ) > msa_native.log 2>&1
-echo "native: rc=$?  $((SECONDS - t0)) s  $(grep -E '^staged|colabfold_search:' msa_native.log | tr '\n' ' ')"
-touch "${TMPDIR:-/tmp}/cfdb-${SLURM_JOB_ID:-$$}/.staged"      # the native run staged the same files under the same name: the image reuses them
+if [ -n "${REF_MSA:-}" ]; then
+  NATIVE_DIR=$REF_MSA
+  echo "native: the existing run in $REF_MSA ($(find "$REF_MSA" -maxdepth 1 -name '*.a3m' | wc -l) a3m files)"
+else
+  NATIVE_DIR=$O/msa_native
+  t0=$SECONDS
+  ( export MMSEQS=$NATIVE_MMSEQS/bin/mmseqs MMSEQS_WRAP=$NATIVE_MMSEQS/mmseqs-dbload2 CFSEARCH=$NATIVE_W/venv/bin/colabfold_search COLABFOLD_DB=$DB
+    bash "$NATIVE_MMSEQS/msa_gpu.sbatch" "$Q" "$NATIVE_DIR" --use-templates 1 ) > msa_native.log 2>&1
+  echo "native: rc=$?  $((SECONDS - t0)) s  $(grep -E '^staged|colabfold_search:' msa_native.log | tr '\n' ' ')"
+  touch "${TMPDIR:-/tmp}/cfdb-${SLURM_JOB_ID:-$$}/.staged"      # the native run staged the same files under the same name: the image reuses them
+fi
 t0=$SECONDS
 STAGE=1 THREADS=64 COLABFOLD_DB=$DB "${C[@]}" search "$Q" "$O/msa_image" --use-templates 1 > msa_image.log 2>&1   # msa_gpu.sbatch's 64 threads
 echo "image:  rc=$?  $((SECONDS - t0)) s  $(grep -E 'cf-search: (staged|colabfold_search)' msa_image.log | tr '\n' ' ')"
 same=0; diff=0; miss=0
-for f in "$O"/msa_native/*.a3m "$O"/msa_native/*.m8; do
+for f in "$NATIVE_DIR"/*.a3m "$NATIVE_DIR"/*.m8; do
   [ -e "$f" ] || continue
   g=$O/msa_image/$(basename "$f")
-  if [ ! -f "$g" ]; then miss=$((miss + 1)); echo "   missing in the image's: $(basename "$f")"
+  if [ ! -f "$g" ]; then miss=$((miss + 1)); [ $miss -le 5 ] && echo "   missing in the image's: $(basename "$f")"
   elif cmp -s "$f" "$g"; then same=$((same + 1))
   else diff=$((diff + 1)); [ $diff -le 5 ] && echo "   DIFFERENT: $(basename "$f") ($(grep -c '^>' "$f" 2>/dev/null) vs $(grep -c '^>' "$g" 2>/dev/null) records)"; fi
 done
-extra=$(comm -13 <(cd "$O/msa_native" && ls ./*.a3m ./*.m8 2>/dev/null | sort) <(cd "$O/msa_image" && ls ./*.a3m ./*.m8 2>/dev/null | sort) | wc -l)
+extra=$(comm -13 <(cd "$NATIVE_DIR" && ls ./*.a3m ./*.m8 2>/dev/null | sort) <(cd "$O/msa_image" && ls ./*.a3m ./*.m8 2>/dev/null | sort) | wc -l)
 echo "MSAS: $same files byte-identical, $diff different, $miss missing from the image's, $extra only in the image's"
+fi
 echo; echo "=== END $(date) ==="

@@ -67,7 +67,7 @@ if [ "$STAGE" = 1 ]; then
         truncate -s "$size" "$dst"
         n=$(( (size + (4 << 30) - 1) / (4 << 30) ))
         for ((i = 0; i < n; i++)); do echo "$f $dst $i"; done
-    done | xargs -P 16 -n 3 sh -c 'dd if="$0" of="$1" bs=64M skip=$(( $2 * 64 )) seek=$(( $2 * 64 )) count=64 iflag=direct conv=notrunc status=none'
+    done | xargs -r -P 16 -n 3 sh -c 'dd if="$0" of="$1" bs=64M skip=$(( $2 * 64 )) seek=$(( $2 * 64 )) count=64 iflag=direct conv=notrunc status=none'
     sync
     echo "staged $(du -s --block-size=1G "$BASE" | cut -f1) GB to $BASE in $(( $(date +%s) - t0 )) s"
     export MMSEQS_REAL=$MMSEQS; MM=$MMSEQS_WRAP

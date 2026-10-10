@@ -53,14 +53,15 @@ MM=$MMSEQS
 if [ "$STAGE" = 1 ]; then
   t0=$(date +%s)
   # every file of the three databases in 4 GiB chunks, 16 readers, read with O_DIRECT from Lustre; a file already staged under this job's
-  # directory with the right size (an earlier search in the same job, CFS_KEEP_STAGED=1) is not copied again
+  # directory with the right size (an earlier search in the same job, CFS_KEEP_STAGED=1) is not copied again. xargs -r: with every file
+  # staged already there is nothing to copy, and plain xargs would still run dd once with no arguments (validation job 50596116)
   for f in "${FILES[@]}"; do
     dst=$BASE/$(basename "$f"); size=$(stat -L -c %s "$f")
     [ -f "$dst" ] && [ ! -L "$dst" ] && [ "$(stat -c %s "$dst")" = "$size" ] && [ -f "$BASE/.staged" ] && continue
     truncate -s "$size" "$dst"
     n=$(( (size + (4 << 30) - 1) / (4 << 30) ))
     for ((i = 0; i < n; i++)); do echo "$f $dst $i"; done
-  done | xargs -P 16 -n 3 sh -c 'dd if="$0" of="$1" bs=64M skip=$(( $2 * 64 )) seek=$(( $2 * 64 )) count=64 iflag=direct conv=notrunc status=none'
+  done | xargs -r -P 16 -n 3 sh -c 'dd if="$0" of="$1" bs=64M skip=$(( $2 * 64 )) seek=$(( $2 * 64 )) count=64 iflag=direct conv=notrunc status=none'
   sync
   touch "$BASE/.staged"
   echo "cf-search: staged $(du -s --block-size=1G "$BASE" | cut -f1) GB to $BASE in $(( $(date +%s) - t0 )) s"
