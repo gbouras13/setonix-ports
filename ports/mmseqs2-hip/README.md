@@ -18,6 +18,9 @@ There are two ways to get it:
 
 `ghcr.io/gbouras13/setonix-ports/mmseqs2-hip`, built by `.github/workflows/mmseqs2-hip-image.yml`. It contains Ubuntu 24.04 with AMD's
 ROCm 7.2.4 HIP runtime and the binary, and nothing else. Run it without `--rocm`.
+- **Validated on Setonix** (2026-10-10), image `sha-49d7cbd`, digest `sha256:4a92d596…`: `slurm/test_gpu.sbatch` (job 50596117)
+  passes. On 1 GCD, on 8 GCDs and through `gpuserver`, the GPU gives the CPU's ungapped hits exactly (529 of 529 pdb100 pairs, 32 of 32
+  UniRef30), and so does the native build. The `colabfold` image carries this binary, and its MSAs are byte-identical to native.
 
 ```bash
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/mmseqs2-hip:main /scratch/<project>/$USER/singularity

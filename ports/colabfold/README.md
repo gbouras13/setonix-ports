@@ -17,6 +17,11 @@ freeze) and scripts. The evidence is in `af3-setonix/COLABFOLD_PORT.md`.
 ## The image
 
 `ghcr.io/gbouras13/setonix-ports/colabfold`, built by `.github/workflows/colabfold-image.yml`.
+- **Tags.**
+  - `:main` is the newest build.
+  - `:1.6.3-1` will be the first release, ColabFold 1.6.3 plus port revision 1 (not published yet).
+  - `:1.6.3` is the newest port revision of ColabFold 1.6.3.
+  - A release is the validated image itself, with the same digest (`.github/workflows/release.yml`).
 - **No weights.** By default it reads Pawsey's AlphaFold2 parameters,
   `/scratch/references/colabfold_jun2026/database/alphafold2_multimer_v3`; `COLABFOLD_OPT_DATA_DIR` names another copy.
 - **Databases** for `colabfold search` are Pawsey's ColabFold databases (`COLABFOLD_DB`), already GPU-padded.

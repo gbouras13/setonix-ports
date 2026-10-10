@@ -33,10 +33,12 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 `:sha-<commit>`. Pull requests build without publishing. The run's summary gives the image digest and the pull command. `checks.yml`
 runs the fast checks (shell and Python syntax, ShellCheck, the Dockerfile build checks, each port's dry-run tests) on every push.
 
-A release is not a rebuild. Once an image passes the port's checks on Setonix, `<port>-release.yml` (run from the Actions tab) gives that
-same image, with the same digest, its version tags, and tags its source commit. A version is the upstream model's version plus a port
-revision. `3.1.4-1` is the first release of this port on AlphaFold 3 3.1.4, and `3.1.4-2` would be a change to the port on the same
-upstream release. Each release publishes three tags:
+A release is not a rebuild. Once an image passes the port's checks on Setonix, and the port's README names its digest on a
+"Validated on Setonix" line, `release.yml` gives that same image, with the same digest, its version tags, and tags its source commit
+`<port>-v<version>`. Run it from the Actions tab, or with `gh workflow run release.yml -f port=<port> -f source=<sha-commit or digest>
+-f version=<version>`. It is a dry run, checks and plan only, unless `dry_run` is set to false. A version is the upstream model's
+version plus a port revision. `3.1.4-1` is the first release of `af3jax` on AlphaFold 3 3.1.4, and `3.1.4-2` would be a change to the
+port on the same upstream release. Each release publishes three tags:
 - `:<version>`, which never moves;
 - `:<upstream version>`, the newest port revision of that release;
 - `:latest`.

@@ -26,9 +26,9 @@ unchanged. Leave it on: the wrapper warns if it is turned off.
 `ghcr.io/gbouras13/setonix-ports/af3jax`, built by `.github/workflows/af3jax-image.yml`.
 - **Tags.**
   - `:main` is the newest build.
-  - `:3.1.4-1` is the first release, AlphaFold 3 3.1.4 plus port revision 1, once its Setonix check passes.
+  - `:3.1.4-1` will be the first release, AlphaFold 3 3.1.4 plus port revision 1 (not published yet).
   - `:3.1.4` is the newest port revision of AlphaFold 3 3.1.4.
-  - A release is the validated image itself, with the same digest (`.github/workflows/af3jax-release.yml`).
+  - A release is the validated image itself, with the same digest (`.github/workflows/release.yml`).
 - It holds an af3_jax tree at `/opt/af3jax`, with the same wrapper and launchers a native install runs.
 - **No weights.** For the official AlphaFold 3 parameters, pass `--model_dir DIR` (a directory holding `af3.bin.zst`). For the
   OpenFold3-preview2 weights converted to AF3 format, bind their directory at `/opt/af3jax/weights/p2`.

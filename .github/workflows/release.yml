@@ -1,0 +1,152 @@
+# Releases a port's image WITHOUT rebuilding it: the release is the very image (the same digest) that passed the port's Setonix
+# validation. A rebuild would be a different image (af3jax's build, for one, compiles its wheel against that day's wwPDB dictionary).
+#   Actions tab -> "release" -> Run workflow (a dry run unless "dry run" is unticked), or with gh:
+#     gh workflow run release.yml -f port=colabfold -f source=sha-49a03af -f version=1.6.3-1                    # dry run: the plan
+#     gh workflow run release.yml -f port=colabfold -f source=sha-49a03af -f version=1.6.3-1 -f dry_run=false   # publishes
+#   port     ports/<port>, built by .github/workflows/<port>-image.yml
+#   source   the validated image: its tag (sha-<commit>) or digest (sha256:...). ports/<port>/README.md must name that digest (its first
+#            8 hex digits) on its "Validated on Setonix" line, so only an image that passed the port's Setonix checks can be released.
+#   version  <upstream version>-<port revision>, e.g. 3.1.4-1 (AlphaFold 3 3.1.4) or 1.6.3-1 (ColabFold 1.6.3). The revision counts
+#            changes to the port on the same upstream release. No ROCm in it: that is in the image's labels.
+#   dry_run  true by default: every check, and the plan in the run's summary. The checks run in a job with read-only access; the
+#            publishing job runs only when dry_run is false.
+# A release publishes :<version> (never moves), :<upstream version> (the newest port revision of that release) and :latest, all on
+# the source digest, and tags the image's source commit <port>-v<version>.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      port:
+        description: "port: af3jax, colabfold, mmseqs2-hip, ..."
+        required: true
+      source:
+        description: "validated image: a tag (sha-<commit>) or a digest (sha256:...)"
+        required: true
+      version:
+        description: "<upstream version>-<port revision>, e.g. 1.6.3-1"
+        required: true
+      dry_run:
+        description: "dry run: check and show the plan, publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.port }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      image: ${{ steps.check.outputs.image }}
+      digest: ${{ steps.check.outputs.digest }}
+      revision: ${{ steps.check.outputs.revision }}
+      upstream: ${{ steps.check.outputs.upstream }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check
+        id: check
+        env:
+          PORT: ${{ inputs.port }}
+          SOURCE: ${{ inputs.source }}
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fail () { echo "::error::$*"; exit 1; }
+          digest () { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2> /dev/null | jq -r '.digest // empty' || true; }
+          [[ "$PORT" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "ports/$PORT" ] && [ -f ".github/workflows/$PORT-image.yml" ] \
+            || fail "port $PORT: no ports/$PORT built by .github/workflows/$PORT-image.yml"
+          IMAGE=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')/$PORT
+          [[ "$VERSION" =~ ^([0-9A-Za-z][0-9A-Za-z._-]{0,100})-([1-9][0-9]{0,3})$ ]] \
+            || fail "version $VERSION: expected <upstream version>-<port revision>, e.g. 1.6.3-1"
+          UPSTREAM=${BASH_REMATCH[1]}
+          case "$UPSTREAM" in main|latest|buildcache|sha-*|pr-*) fail "version $VERSION would move the build tag :$UPSTREAM";; esac
+          case "$SOURCE" in
+            sha256:*) REF="$IMAGE@$SOURCE" ;;
+            sha-*) REF="$IMAGE:$SOURCE" ;;
+            *) fail "source $SOURCE: sha-<commit> or sha256:<digest>" ;;
+          esac
+          DIGEST=$(digest "$REF")
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "$REF: no such image"
+          REV=$(docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{json .Image}}' | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty')
+          [[ "$REV" =~ ^[0-9a-f]{40}$ ]] || fail "$REF carries no source commit label: not an image of this repository's build"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$REV" > /dev/null || fail "the image's source commit $REV is not in $GITHUB_REPOSITORY"
+          LINE=$(grep -m 1 -E "Validated on Setonix.*sha256:${DIGEST:7:8}" "ports/$PORT/README.md") \
+            || fail "ports/$PORT/README.md names no sha256:${DIGEST:7:8} on a 'Validated on Setonix' line: validate the image on Setonix and record it there first"
+          [ -z "$(digest "$IMAGE:$VERSION")" ] || fail "$IMAGE:$VERSION already exists: a release never moves, so pick the next port revision"
+          ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PORT-v$VERSION" > /dev/null 2>&1 || fail "the git tag $PORT-v$VERSION already exists"
+          OLD_UPSTREAM=$(digest "$IMAGE:$UPSTREAM")
+          OLD_LATEST=$(digest "$IMAGE:latest")
+          printf 'image=%s\ndigest=%s\nrevision=%s\nupstream=%s\n' "$IMAGE" "$DIGEST" "$REV" "$UPSTREAM" >> "$GITHUB_OUTPUT"
+          {
+            if [ "$DRY_RUN" = true ]; then echo "### Dry run: nothing published"; else echo "### Releasing $PORT $VERSION"; fi
+            echo
+            echo "- \`$IMAGE:$VERSION\` (new), \`:$UPSTREAM\` (now ${OLD_UPSTREAM:-none}) and \`:latest\` (now ${OLD_LATEST:-none}) -> \`$DIGEST\`, the image \`$REF\`"
+            echo "- git tag \`$PORT-v$VERSION\` -> \`$REV\`"
+            echo "- ports/$PORT/README.md: ${LINE#- }"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: plan
+    if: inputs.dry_run == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote
+        env:
+          PORT: ${{ inputs.port }}
+          VERSION: ${{ inputs.version }}
+          IMAGE: ${{ needs.plan.outputs.image }}
+          DIGEST: ${{ needs.plan.outputs.digest }}
+          REV: ${{ needs.plan.outputs.revision }}
+          UPSTREAM: ${{ needs.plan.outputs.upstream }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fail () { echo "::error::$*"; exit 1; }
+          digest () { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2> /dev/null | jq -r '.digest // empty' || true; }
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ && "$REV" =~ ^[0-9a-f]{40}$ && -n "$UPSTREAM" ]] || fail "the plan's outputs are missing"
+          [ -z "$(digest "$IMAGE:$VERSION")" ] || fail "$IMAGE:$VERSION already exists: a release never moves, so pick the next port revision"
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" --tag "$IMAGE:$UPSTREAM" --tag "$IMAGE:latest" "$IMAGE@$DIGEST"
+          for t in "$VERSION" "$UPSTREAM" latest; do
+            got=$(digest "$IMAGE:$t")
+            [ "$got" = "$DIGEST" ] || fail "$IMAGE:$t is ${got:-missing}, not the source $DIGEST"
+          done
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$PORT-v$VERSION" -f sha="$REV" > /dev/null
+          {
+            echo "### Released \`$IMAGE:$VERSION\`"
+            echo
+            echo "- also \`:$UPSTREAM\` and \`:latest\`, all on \`$DIGEST\` (the source image, unchanged)"
+            echo "- source commit \`$REV\`, tagged \`$PORT-v$VERSION\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
