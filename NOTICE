@@ -24,6 +24,16 @@ The mmseqs2-hip image (ports/mmseqs2-hip/container/Dockerfile), and every image 
     GNU General Public License v3.0. The corresponding source is the upstream repository at that commit.
   - AMD ROCm 7.2.4's HIP runtime packages and the Ubuntu 24.04 base image (packages under their own licences).
 
+The colabfold image (ports/colabfold/container/Dockerfile) contains, besides that MMseqs2 binary and the ROCm components above:
+  - ColabFold 1.6.3 (sokrypton/ColabFold): MIT License; alphafold-colabfold 2.3.20 (AlphaFold 2 code, Copyright DeepMind): Apache 2.0;
+    colabfold-binaries 0.1.0 (kalign, hhsearch, under their own licences).
+  - JAX, jaxlib and the jax-rocm7 plugin (Apache License 2.0), and the other Python packages of ports/colabfold/environment/requirements.lock,
+    each under its own licence.
+  - The ColabFold optimisation kit, anthropics/uplifting-biomolecular-modeling (Copyright 2026 Anthropic, PBC): Apache License 2.0, with
+    its own NOTICE, at /opt/colabfold/kit.
+  - CPython 3.12.12 (PSF License), from python-build-standalone.
+  The AlphaFold 2 model parameters are not included (CC BY 4.0, Google DeepMind): the image reads a copy from outside.
+
 MODEL PARAMETERS ARE NOT INCLUDED
 
 No image and no file in this repository contains model weights or parameters. The AlphaFold 3 model parameters are available from

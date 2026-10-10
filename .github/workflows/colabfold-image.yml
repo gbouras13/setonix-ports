@@ -1,0 +1,141 @@
+# Builds the ColabFold image (ports/colabfold/container/Dockerfile: ColabFold 1.6.3 with the kit's modes, and colabfold_search on the GPU
+# build of MMseqs2, copied by digest from the mmseqs2-hip image) and pushes it to ghcr.io/<owner>/<repo>/colabfold.
+#   push to main (paths below)   -> :main and :sha-<short>
+#   pull request                 -> build only, nothing pushed
+#   manual (Actions tab)         -> as for the branch it runs on
+# Setonix pulls it as a SIF in a compute job: slurm/pull_image.sbatch. Images cannot be built on Setonix.
+name: colabfold image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ports/colabfold/container/**
+      - ports/colabfold/scripts/**
+      - ports/colabfold/tools/**
+      - ports/colabfold/environment/**
+      - ports/colabfold/tests/**
+      - ports/colabfold/.dockerignore
+      - .github/workflows/colabfold-image.yml
+  pull_request:
+    paths:
+      - ports/colabfold/container/**
+      - ports/colabfold/scripts/**
+      - ports/colabfold/tools/**
+      - ports/colabfold/environment/**
+      - ports/colabfold/tests/**
+      - ports/colabfold/.dockerignore
+      - .github/workflows/colabfold-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: colabfold-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      # The ROCm step installs about 17 GB before the gfx90a prune, and the runner starts with far less free on /. Remove the
+      # preinstalled toolchains this build never uses, then move Docker's storage (and with it BuildKit's) to the larger disk.
+      - name: Make disk space
+        run: |
+          df -h / /mnt 2>/dev/null || df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost /usr/share/swift /usr/local/julia* /opt/microsoft /opt/google /usr/local/share/chromium \
+                      /usr/local/share/powershell /usr/lib/jvm || true
+          sudo docker image prune --all --force > /dev/null || true
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /mnt/swapfile /swapfile || true
+          root_free=$(df --output=avail -k / | tail -1)
+          mnt_free=$(df --output=avail -k /mnt 2>/dev/null | tail -1 || echo 0)
+          if [ "${mnt_free:-0}" -gt "$root_free" ]; then
+            sudo systemctl stop docker.socket docker
+            sudo mkdir -p /mnt/docker
+            cfg=/etc/docker/daemon.json
+            [ -s "$cfg" ] || echo '{}' | sudo tee "$cfg" > /dev/null
+            sudo jq '. + {"data-root": "/mnt/docker"}' "$cfg" | sudo tee "$cfg.new" > /dev/null && sudo mv "$cfg.new" "$cfg"
+            sudo systemctl start docker
+          fi
+          echo "Docker storage: $(docker info --format '{{.DockerRootDir}}')"
+          df -h / /mnt 2>/dev/null || df -h /
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/colabfold" >> "$GITHUB_ENV"
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-,format=short,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=colabfold-setonix
+            org.opencontainers.image.description=ColabFold 1.6.3 with the ColabFold kit's modes and colabfold_search on MMseqs2's GPU build, for AMD MI250X (gfx90a), ROCm 7.2.4, jax 0.10.2. No weights inside.
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One built stage (the mmseqs stage is a pulled image), so the inline cache in :main covers every built layer.
+      # One plain manifest (no attestations), the simplest thing for `singularity pull` to read.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ports/colabfold
+          file: ports/colabfold/container/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PRUNE_GPU_ARCH=gfx90a
+            SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
+            SOURCE_REV=${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:main
+          cache-to: type=inline
+          provenance: false
+          sbom: false
+
+      - name: Report
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          docker buildx imagetools inspect --raw "$IMAGE@$DIGEST" > manifest.json
+          python3 - manifest.json <<'EOF' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, sys
+          m = json.load(open(sys.argv[1]))
+          sizes = [layer["size"] for layer in m.get("layers", [])]
+          print(f"{len(sizes)} layers, {sum(sizes) / 2**30:.2f} GiB compressed; largest {max(sizes) / 2**30:.2f} GiB "
+                "(ghcr.io refuses layers over 10 GB)" if sizes else "no layer list in the manifest")
+          EOF
+          {
+            echo
+            echo "digest \`$DIGEST\`"
+            echo
+            echo "tags:"
+            printf '%s\n' "$TAGS" | sed 's/^/- `/; s/$/`/'
+            echo
+            echo "On Setonix (a compute job): \`sbatch slurm/pull_image.sbatch ${IMAGE}@${DIGEST} /scratch/<project>/\$USER/singularity\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

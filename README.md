@@ -9,7 +9,7 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 |---|---|---|
 | [`af3jax`](ports/af3jax/) | AlphaFold 3 (JAX), one GCD or a whole node | wrapper, launchers, checks, image `ghcr.io/gbouras13/setonix-ports/af3jax` (validated) |
 | [`mmseqs2-hip`](ports/mmseqs2-hip/) | MMseqs2's GPU (HIP) build, for `colabfold_search` and any GPU search | image `ghcr.io/gbouras13/setonix-ports/mmseqs2-hip`, GPU test |
-| `colabfold` | ColabFold 1.6.3 with the kit's modes, plus `colabfold_search` on the GPU binary | next |
+| [`colabfold`](ports/colabfold/) | ColabFold 1.6.3 with the kit's modes, plus `colabfold_search` on the GPU binary | image `ghcr.io/gbouras13/setonix-ports/colabfold`, validation job |
 | `openfold3`, `protenix`, `boltz2`, `opendde`, `proteinmpnn` | | not yet: ported and validated on Setonix, to follow here |
 
 ## Using an image on Setonix
