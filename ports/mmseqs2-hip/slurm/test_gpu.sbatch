@@ -6,10 +6,12 @@
 #SBATCH --time=00:45:00
 #SBATCH --output=mmseqs2-hip-test.%j.out
 
-# The mmseqs2-hip image on one Setonix GPU node (8 MI250X GCDs): BUILD.md's correctness test (job 50232402), run through the image.
+# BUILD.md's correctness test (job 50232402) on one Setonix GPU node (8 MI250X GCDs), for the image or for a binary you built:
 #   sbatch --account=<project>-gpu test_gpu.sbatch SIF=<the .sif> OUT=<dir> [NATIVE=<a native mmseqs>] [DB=<ColabFold database root>]
+#   sbatch --account=<project>-gpu test_gpu.sbatch BIN=<your mmseqs> QUERIES=<tests/SAOMS1_phanotate.faa> OUT=<dir> [DB=...]
 #   (arguments, not variables: Setonix sets SBATCH_EXPORT=NONE)
-# Queries: the 246 proteins of Staphylococcus phage SAOMS1 (pharokka test data, inside the image at /opt/mmseqs/tests).
+# Queries: the 246 proteins of Staphylococcus phage SAOMS1 (pharokka test data: tests/SAOMS1_phanotate.faa, in the image at
+# /opt/mmseqs/tests).
 #   1. pdb100 (GPU-padded): the CPU's ungapped prefilter (the algorithm the GPU runs) against the GPU on 1 GCD, on 8 GCDs and through
 #      gpuserver; the CPU's default k-mer prefilter for reference. Hits compared pair by pair.
 #   2. UniRef30 2302 consensus (GPU-padded, 8.7 GB): GPU on 8 GCDs against the CPU, 10 queries.
@@ -17,21 +19,32 @@
 set -uo pipefail
 for a in "$@"; do
   case "$a" in
-    SIF=*|OUT=*|NATIVE=*|DB=*) export "${a?}" ;;
-    *) echo "unknown argument '$a': SIF= OUT= NATIVE= DB="; exit 2 ;;
+    SIF=*|BIN=*|QUERIES=*|OUT=*|NATIVE=*|DB=*) export "${a?}" ;;
+    *) echo "unknown argument '$a': SIF= | BIN= QUERIES=, OUT= NATIVE= DB="; exit 2 ;;
   esac
 done
-: "${SIF:?SIF=<the mmseqs2-hip .sif>}" "${OUT:?OUT=<a directory>}"
+: "${OUT:?OUT=<a directory>}"
+[ -n "${SIF:-}" ] || [ -n "${BIN:-}" ] || { echo "give SIF=<the mmseqs2-hip .sif> or BIN=<an mmseqs binary>"; exit 2; }
+[ -n "${QUERIES:-}" ] && QUERIES=$(readlink -f "$QUERIES")
 DB=${DB:-/scratch/references/colabfold_jun2026/database}
 PDB=$DB/pdb100/pdb100_230517
 UR=$DB/colabfold_uniref30/uniref30_2302_db
 W=$OUT/run-${SLURM_JOB_ID:-local}; mkdir -p "$W"; cd "$W" || exit 3
-module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
-export SINGULARITY_CACHEDIR=${TMPDIR:-/tmp}/sing-cache.$$ APPTAINER_CACHEDIR=${TMPDIR:-/tmp}/sing-cache.$$
-M=(singularity exec "$SIF" mmseqs)   # never --rocm
+if [ -n "${SIF:-}" ]; then
+  module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+  export SINGULARITY_CACHEDIR=${TMPDIR:-/tmp}/sing-cache.$$ APPTAINER_CACHEDIR=${TMPDIR:-/tmp}/sing-cache.$$
+  M=(singularity exec "$SIF" mmseqs)   # never --rocm
+  CAT=(singularity exec "$SIF" cat)
+  QUERIES=${QUERIES:-/opt/mmseqs/tests/SAOMS1_phanotate.faa}
+  echo "node $(hostname)  $(date -Is)  image $SIF"
+  singularity exec "$SIF" cat /opt/mmseqs/build.txt /opt/mmseqs/source.txt
+else
+  M=("$BIN")
+  CAT=(cat)
+  : "${QUERIES:?QUERIES=<tests/SAOMS1_phanotate.faa>}"
+  echo "node $(hostname)  $(date -Is)  binary $BIN"
+fi
 export OMP_PROC_BIND=false
-echo "node $(hostname)  $(date -Is)  image $SIF"
-singularity exec "$SIF" cat /opt/mmseqs/build.txt /opt/mmseqs/source.txt
 echo "mmseqs $("${M[@]}" version)"
 [ -n "${NATIVE:-}" ] && echo "native $NATIVE: $("$NATIVE" version)"
 
@@ -49,8 +62,8 @@ m8 () {    # binary..., query db, target db, result db, out
     --format-output query,target,evalue,bits,pident,alnlen,qstart,qend,tstart,tend > /dev/null 2>&1
 }
 
-"${M[@]}" createdb /opt/mmseqs/tests/SAOMS1_phanotate.faa qdb > /dev/null
-singularity exec "$SIF" cat /opt/mmseqs/tests/SAOMS1_phanotate.faa | awk '/^>/{n++} n<=10' > q10.faa
+"${M[@]}" createdb "$QUERIES" qdb > /dev/null
+"${CAT[@]}" "$QUERIES" | awk '/^>/{n++} n<=10' > q10.faa
 "${M[@]}" createdb q10.faa q10 > /dev/null
 
 echo; echo "=== 1. pdb100, 246 queries ==="
@@ -109,8 +122,8 @@ cmp('pdb.g8.m8', 'pdb.gs.m8', 'gpu_8gcd', 'gpu_server')
 cmp('pdb.cpu0.m8', 'pdb.g8.m8', 'cpu_kmer', 'gpu_8gcd', must_match=False)
 cmp('ur10.cpu.m8', 'ur10.g8.m8', 'ur_cpu', 'ur_gpu8')
 if os.path.exists('pdb.ng8.m8') or os.path.exists('ur10.ng8.m8'):
-    cmp('pdb.ng8.m8', 'pdb.g8.m8', 'native_pdb', 'image_pdb')
-    cmp('ur10.ng8.m8', 'ur10.g8.m8', 'native_ur', 'image_ur')
+    cmp('pdb.ng8.m8', 'pdb.g8.m8', 'native_pdb', 'tested_pdb')
+    cmp('ur10.ng8.m8', 'ur10.g8.m8', 'native_ur', 'tested_ur')
 print("VERDICT:", "PASS (every GPU search identical to its reference)" if bad == 0 else f"FAIL ({bad} comparison(s) differ)")
 EOF
 echo; echo "[test] done $(date -Is)"

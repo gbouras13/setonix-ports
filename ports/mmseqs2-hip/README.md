@@ -8,6 +8,12 @@ CPU's default k-mer prefilter.
 
 The `colabfold` image carries this binary for `colabfold_search`.
 
+There are two ways to get it:
+- **Pull the image** (below). Nothing to build.
+- **Build the binary yourself** on Setonix: `BUILD.md`. It covers four downloads on a login node, then `slurm/build.sbatch`, about 7
+  minutes on one CPU node. The result is a single binary with an RPATH to Pawsey's ROCm 7.2.4 module, so it needs no container or
+  module to run. `slurm/msa_gpu.sbatch` runs ColabFold MSAs with it, and `slurm/test_gpu.sbatch BIN=...` checks it.
+
 ## The image
 
 `ghcr.io/gbouras13/setonix-ports/mmseqs2-hip`, built by `.github/workflows/mmseqs2-hip-image.yml`. It contains Ubuntu 24.04 with AMD's
@@ -33,17 +39,18 @@ $M search qdb /scratch/references/colabfold_jun2026/database/pdb100/pdb100_23051
 - **Many searches against one database.** Keep the database resident on the GCDs: start `$M gpuserver TARGET_pad --prefilter-mode 1 &`,
   then add `--gpu-server 1` to each search.
 - **`mmseqs-dbload2`** (in the image) runs the database-reading steps with `--db-load-mode 2`. It is the fix for `colabfold_search` on
-  Lustre (`af3-setonix/mmseqs2-hip/BUILD.md`).
+  Lustre (BUILD.md, "The Lustre bottleneck").
 
 ## Check
 
-`slurm/test_gpu.sbatch` repeats BUILD.md's correctness test through the image, on one GPU node in about 10 minutes. It runs the 246
-SAOMS1 phage proteins against pdb100 and UniRef30 and checks:
+`slurm/test_gpu.sbatch` repeats BUILD.md's correctness test on one GPU node, in about 10 minutes, through the image (`SIF=`) or on a
+binary you built (`BIN=`). It runs the 246 SAOMS1 phage proteins against pdb100 and UniRef30 and checks:
 - the GPU on 1 GCD, on 8 GCDs and through `gpuserver` gives the same hits as the CPU's ungapped search;
-- with `NATIVE=`, it also gives the same hits as the native binary.
+- with `NATIVE=`, it also gives the same hits as another binary.
 
 ```bash
 sbatch --account=<project>-gpu ports/mmseqs2-hip/slurm/test_gpu.sbatch SIF=<the .sif> OUT=<dir> NATIVE=<native mmseqs>
+sbatch --account=<project>-gpu ports/mmseqs2-hip/slurm/test_gpu.sbatch BIN=<your mmseqs> QUERIES=ports/mmseqs2-hip/tests/SAOMS1_phanotate.faa OUT=<dir>
 ```
 
-MMseqs2 is GPLv3. Its source is upstream at the pinned commit, and the build is `container/Dockerfile`.
+MMseqs2 is GPLv3. Its source is upstream at the pinned commit; the builds are `BUILD.md` (native) and `container/Dockerfile`.
