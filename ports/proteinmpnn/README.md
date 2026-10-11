@@ -52,6 +52,18 @@ The kit ships no `fast` tier for ProteinMPNN, so there is no accuracy trade-off 
   - `dp --mode exact` on 8 GCDs x 2 workers over 92 backbones: image and native byte-identical, 92 of 92. Designing runs at native
     speed (6.6 s for the first worker's share in both), but each image worker takes about 17 s longer to start, so this pass took
     40.7 s against 28.3 s. It is an A/A check at 92 backbones, not the 402 designs/s measured natively over 1,472.
+  - At that size, 1,472 backbones x 8 designs (job 50668900), image and native are byte-identical too, on 8 GCDs x 2 and on one GCD.
+- **Start-up.** Designing runs at native speed, but a run starts later from the SIF, and more so with more workers. At 1,472
+  backbones x 8 designs (job 50668900, both arms warm) the difference is 5.7 s on one GCD (143.9 against 138.2 s), 9.7 s on 8 GCDs x 1
+  (38.4 against 28.7) and 17.1 s on 8 x 2 (44.7 against 27.6). A SIF is a gzip squashfs that each `singularity exec` mounts afresh
+  and the kernel decompresses on one thread, so workers that start together queue for torch's libraries (job 50669530).
+  - From the SIF, `--per-gcd 1` is the faster whole node at that size (307 against 263 designs/s); natively `--per-gcd 2` leads. Even
+    263 is above stock's best node rate, 200.9.
+  - For many short runs in one job, run them in one `singularity exec` (a second `dp` there started 12 s sooner), or unpack the image
+    to the node's NVMe once and run from that: book it with `--gres=gpu:8,tmp:100G`, then `singularity build --sandbox /tmp/pms-sandbox $SIF`
+    (about 13 s) and use `/tmp/pms-sandbox` in place of `$SIF`. Start-up then matches native (9.6 against 8.9 s for 16 backbones on 8 x 2).
+  - Natively it is the first run on a node that starts slowly: 50 s for one process while Lustre's cache is cold, against 8 s from
+    the SIF.
 
 ```bash
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/proteinmpnn:main /scratch/<project>/$USER/singularity
@@ -73,7 +85,7 @@ export PMS_LOCAL=/tmp/pms-$USER-$SLURM_JOB_ID && mkdir -p $PMS_LOCAL
 C="singularity exec --bind $PMS_LOCAL:$PMS_LOCAL $SIF proteinmpnn"       # never --rocm
 
 $C design --mode exact --input backbones/ --out designs/ --num_seq_per_target 8 --sampling_temp 0.1 --seed 37   # one GCD
-$C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --per-gcd 2 --num_seq_per_target 8  # the node
+$C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --per-gcd 1 --num_seq_per_target 8  # the node (Start-up)
 ```
 
 - **`design`** is the kit's own `run.sh design` with the boot patch injected. Every stock option works and means what it means upstream
@@ -85,10 +97,11 @@ $C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --pe
     real run does not. `--hybrid_gemm 1` asks for the lever anyway, and the kit will refuse it.
 - **`dp`** spreads one pass over the GCDs (`scripts/pms_dp.py`). In `exact` it stays byte-identical to **one** stock process however many
   workers it uses: each worker computes every backbone's offset in the single-process RNG stream and designs only its own share of the
-  kit's length-sorted batch plan. `--per-gcd 2` was the fastest arrangement measured (402 designs/s against 339 at one worker per GCD).
+  kit's length-sorted batch plan. Natively `--per-gcd 2` was the fastest arrangement measured (402 designs/s against 339 at one worker
+  per GCD); from the SIF it is `--per-gcd 1` (Start-up, above).
   In `off` each shard restarts the seed, so its designs are valid samples but not a single stock run's bytes.
 - **Scratch.** `PMS_LOCAL` holds temporaries and the one compiled Triton kernel; bind it into the container as above, or the kernel is
-  recompiled per job (~20 s). `MODEL_OPT_JIT_ROOT` on `/scratch` keeps it between jobs.
+  recompiled per job (about 2 s, job 50669530). `MODEL_OPT_JIT_ROOT` on `/scratch` keeps it between jobs.
 - **Other commands:** `proteinmpnn check`, `proteinmpnn compare A B`, `proteinmpnn kit ...` (the kit's unpatched `run.sh`),
   `proteinmpnn version`, `proteinmpnn python`, `proteinmpnn shell`.
 
