@@ -34,6 +34,15 @@ The colabfold image (ports/colabfold/container/Dockerfile) contains, besides tha
   - CPython 3.12.12 (PSF License), from python-build-standalone.
   The AlphaFold 2 model parameters are not included (CC BY 4.0, Google DeepMind): the image reads a copy from outside.
 
+The boltz2 image (ports/boltz2/container/Dockerfile) contains, besides the ROCm components above:
+  - Boltz 2.2.1 (jwohlwend/boltz; MIT License), installed from the wheel the optimisation kit ships and pins.
+  - PyTorch 2.14.0+rocm7.2 and triton-rocm 3.8.0 (BSD-style licences), which carry their own ROCm 7.2 runtime libraries, and the other
+    Python packages of ports/boltz2/environment/requirements.lock, each under its own licence.
+  - The Boltz-2 optimisation kit, anthropics/uplifting-biomolecular-modeling (Copyright 2026 Anthropic, PBC): Apache License 2.0, with
+    its own NOTICE, at /opt/boltz2/kit.
+  - CPython 3.12.12 (PSF License), from python-build-standalone.
+  The Boltz-2 weights are not included (MIT, boltz-community on Hugging Face): `boltz2 fetch-weights` downloads them at the user's request.
+
 MODEL PARAMETERS ARE NOT INCLUDED
 
 No image and no file in this repository contains model weights or parameters. The AlphaFold 3 model parameters are available from

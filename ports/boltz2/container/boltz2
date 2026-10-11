@@ -1,0 +1,96 @@
+#!/bin/sh
+# boltz2 -- entry point of the Boltz-2 Setonix image (ports/boltz2). It keeps the host's software environment out and runs the port's
+# own scripts on the image's tree, /opt/boltz2: the same tree a native install has (venv/, kit/, scripts/, tools/), without weights.
+# POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV, which bash would source. Run WITHOUT --rocm.
+#
+#   boltz2 fetch-weights DIR       the four weight files (6.55 GB; Hugging Face boltz-community, MIT) into DIR, each checked against
+#                                  the kit's pinned sha256. Once; a file already there with the right digest is kept
+#   boltz2 pred [--weights DIR] --mode off|exact|fast|big [--n_gpu P] --input X.yaml --out_dir OUT [upstream options]
+#                                  one prediction with the mode's gfx90a recipe (scripts/b2s-pred.sh):
+#                                    off    stock boltz 2.2.1 in the kit's clean subprocess (--no_kernels)
+#                                    exact  the kit's exact mode, byte-identical to stock
+#                                    fast   the kit's default mode (B2S_FAST_PATCH=1 adds the opt-in row patch)
+#                                    big    one GCD: the flash recipe; --n_gpu 2|4|8: row-sharded over that many GCDs of the node
+#   boltz2 compare A B             per model: byte identity, CA RMSD and score deltas between two output directories
+#   boltz2 check [--no-gpu] [--weights DIR] [--predict]
+#                                  versions, pins, GPUs, where every GPU library was loaded from; with weights, their digests; with
+#                                  --predict, the kit's 398-token example through stock and exact, compared byte for byte
+#   boltz2 kit ...                 the kit's own run.sh, unpatched (e.g. `kit check --mode exact`)
+#   boltz2 version | python ... | shell ... | help
+#
+# Weights: --weights DIR or B2S_WEIGHTS=DIR. Setonix starts every job from a fresh login environment (SBATCH_EXPORT=NONE), so set what
+# you need inside the job script. Scratch for temporaries, the staged weights cache (mols/ unpacked: ~45,000 files) and compiled kernels:
+# B2S_LOCAL, default a directory under TMPDIR (node-local) per invocation. One sharded (--n_gpu) prediction per node.
+set -eu
+
+note() { printf '[boltz2] %s\n' "$*" >&2; }
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` function are dropped. Slurm's variables, ROCR_VISIBLE_DEVICES and the port's B2S_* / MODEL_OPT_* words pass
+#    through. The kit strips BOLTZ_* / BZ_* / ROWPAIR_* (its own switch families) from its worker and stock processes itself.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT HIP_PATH HSA_PATH ROCM_HOME \
+         HIP_PLATFORM BASH_ENV ENV LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_ VIRTUAL_ENV MODEL_OPT; do
+  unset "$v" 2>/dev/null || true
+done
+W=/opt/boltz2
+# bz-env.sh checks its base interpreter's stdlib landmark (natively the OpenFold3 env on /scratch, which the purge can take); here
+# that interpreter is the image's own.
+export B2S_ROOT=$W B2S_BASE_LANDMARK=/opt/python/lib/python3.12/os.py ROCM_PATH=/opt/rocm PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 \
+       PYTHONDONTWRITEBYTECODE=1 PATH=$W/scripts/bin:$W/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+# 2. --weights DIR (pred, check) -> B2S_WEIGHTS
+if [ "${1:-}" = "--weights" ]; then
+  [ $# -ge 2 ] || { note "--weights needs a directory"; exit 2; }
+  B2S_WEIGHTS=$2; shift 2
+fi
+[ -n "${B2S_WEIGHTS:-}" ] && export B2S_WEIGHTS
+
+# 3. Writable scratch outside $HOME (1 GB quota on Setonix) and outside the read-only image: one directory per invocation unless
+#    B2S_LOCAL is given, so concurrent predictions in one job never share a cache. bz-env.sh puts the JIT, Triton, MIOpen and numba
+#    caches under it. The kit's weights-digest memo goes beside the weights when that directory is writable (it then serves every
+#    later job: 4.7 GB is hashed once), else under B2S_LOCAL.
+T=${B2S_LOCAL:-${TMPDIR:-/tmp}/b2s-$(id -u)-${SLURM_JOB_ID:-x}-$$}
+mkdir -p "$T" 2>/dev/null || T=$(mktemp -d)
+export B2S_LOCAL="$T"
+if [ -z "${MODEL_OPT_WEIGHTS_DIGEST_DIR:-}" ]; then
+  if [ -n "${B2S_WEIGHTS:-}" ] && mkdir -p "$B2S_WEIGHTS/.b2s-digest" 2>/dev/null && [ -w "$B2S_WEIGHTS/.b2s-digest" ]; then
+    MODEL_OPT_WEIGHTS_DIGEST_DIR=$B2S_WEIGHTS/.b2s-digest
+  else
+    MODEL_OPT_WEIGHTS_DIGEST_DIR=$T/digest
+  fi
+fi
+export MODEL_OPT_WEIGHTS_DIGEST_DIR
+
+# 4. Every verb below sources the port's own scripts/bz-env.sh first: the venv, the nvidia-smi shim (the kit identifies the GPU with it
+#    alone), the kit's paths, HIP_LAUNCH_BLOCKING=1 and DEBUG_CLR_GRAPH_PACKET_CAPTURE=0. It returns 97 if the tree is incomplete.
+case "$cmd" in
+  pred|predict)
+    [ -n "${B2S_WEIGHTS:-}" ] || { note "no weights: give --weights DIR or B2S_WEIGHTS=DIR (boltz2 fetch-weights DIR fetches them)"; exit 2; }
+    exec $CLEAN /bin/bash -c '. "$1/scripts/bz-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/b2s-pred.sh" "${@:2}"' _ "$W" "$@" ;;
+  fetch-weights)
+    [ $# -ge 1 ] || { note "usage: boltz2 fetch-weights DIR"; exit 2; }
+    exec $CLEAN /bin/bash -c '. "$1/scripts/bz-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/fetch-weights.sh" "${@:2}"' _ "$W" "$@" ;;
+  compare)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/bz-env.sh" > /dev/null || exit 97; exec python "$1/tools/b2s_outputs.py" compare "${@:2}"' _ "$W" "$@" ;;
+  kit)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/bz-env.sh" > /dev/null || exit 97; exec bash "$MODEL_OPT/run.sh" "${@:2}"' _ "$W" "$@" ;;
+  check)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/bz-env.sh" > /dev/null 2>&1 || exit 97
+                              exec python "$1/container/boltz2_check.py" "${@:2}"' _ "$W" "$@" ;;
+  version)
+    cat $W/source.txt $W/kit.txt $W/rocm-packages.txt 2>/dev/null
+    grep -E '^(torch|triton-rocm|numpy|boltz)( @ |==)' $W/environment/image-freeze.txt 2>/dev/null | sed 's/==/ /; s/ @ file:.*\// /'
+    exit 0 ;;
+  python)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/bz-env.sh" > /dev/null 2>&1; exec python "${@:2}"' _ "$W" "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (boltz2 help)"; exit 2 ;;
+esac
