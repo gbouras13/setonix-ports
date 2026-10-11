@@ -40,7 +40,14 @@ module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singu
 export SINGULARITY_CACHEDIR=$T/cache SINGULARITY_TMPDIR=$T/tmp APPTAINER_CACHEDIR=$T/cache APPTAINER_TMPDIR=$T/tmp
 echo "singularity: $(singularity --version)"
 t0=$SECONDS
-singularity pull --force "$SIF.partial" "docker://$IMAGE"
+# ghcr.io drops an HTTP/2 stream now and then on a big layer (job 50659692: "stream error ... PROTOCOL_ERROR" on proteinmpnn's 3.7 GiB
+# layer), so three tries. Layers already fetched stay in the cache above, so a retry fetches only what failed.
+for try in 1 2 3; do
+  singularity pull --force "$SIF.partial" "docker://$IMAGE" && break
+  rm -f "$SIF.partial"
+  [ "$try" -lt 3 ] || { echo "ABORT: the pull failed 3 times"; exit 1; }
+  echo "pull attempt $try failed; retrying in 30 s"; sleep 30
+done
 mv -f "$SIF.partial" "$SIF"
 echo "pulled in $((SECONDS - t0)) s: $SIF ($(du -h "$SIF" | cut -f1))"
 
