@@ -22,8 +22,10 @@
 #           seed, and every one of the twelve pairings compared byte for byte. This is the question the image has to answer: an
 #           interpreter built elsewhere (python-build-standalone 3.11.14, not cray-python 3.11.7) and ROCm libraries pruned to gfx90a
 #           must still produce the bytes in af3-setonix/PROTEINMPNN_PORT.md.
-# 3. tput   a benchmark pass over BENCH on all 8 GCDs, two workers each, image and native, exact mode: designs/s compared with the
-#           402/s the native port measured. Skipped quietly if BENCH is absent.
+# 3. tput   a benchmark pass over BENCH on all 8 GCDs, two workers each, image and native, exact mode, both warmed first. This is
+#           an A/A sanity check -- do the two arms agree, and are the designs identical -- not a reproduction of the port's 402
+#           designs/s, which was measured over 1,472 backbones; bench92 is 92, where start-up is most of the wall clock.
+#           Skipped quietly if BENCH is absent.
 set -uo pipefail
 for a in "$@"; do
   case "$a" in
@@ -80,12 +82,17 @@ for p in "$EX"/PDB_monomers/pdbs/5L33.pdb "$EX"/PDB_monomers/pdbs/6MRR.pdb "$EX"
 done
 echo "  $(ls "$IN" | wc -l) inputs, seed 37, $SEQS designs each, sampling_temp 0.1"
 OPTS=(--seed 37 --num_seq_per_target "$SEQS" --sampling_temp 0.1 --batch_size 1)
+# `exact` needs --hybrid_gemm 0, and it has to come before the input: run.sh stops reading its own options at the first it does not
+# know. Without it the kit refuses the mode by name (rc 3, nothing designed), because its probe finds that lever is not bit-identical
+# on gfx90a. The probe passes on ONE backbone and fails from two, so a single-input arm would not reveal the omission -- 50645953 ran
+# six and both exact arms, native and image alike, exited 3.
 for arm in native_off native_exact image_off image_exact; do
   mode=${arm#*_}; d=$O/$arm; rm -rf "$d"
+  KIT=(); [ "$mode" = exact ] && KIT=(--hybrid_gemm 0)
   t0=$SECONDS
   case "$arm" in
-    native_*) native design --mode "$mode" --input "$IN" --out "$d" "${OPTS[@]}" > "$arm.log" 2>&1; rc=$? ;;
-    image_*)  "${C[@]}" design --mode "$mode" --input "$IN" --out "$d" "${OPTS[@]}" > "$arm.log" 2>&1; rc=$? ;;
+    native_*) native design --mode "$mode" ${KIT[@]+"${KIT[@]}"} --input "$IN" --out "$d" "${OPTS[@]}" > "$arm.log" 2>&1; rc=$? ;;
+    image_*)  "${C[@]}" design --mode "$mode" ${KIT[@]+"${KIT[@]}"} --input "$IN" --out "$d" "${OPTS[@]}" > "$arm.log" 2>&1; rc=$? ;;
   esac
   echo "  $(printf '%-13s' "$arm") rc=$rc  $((SECONDS - t0)) s  $(ls "$d/seqs" 2>/dev/null | wc -l) fa"
   [ "$rc" -eq 0 ] || FAIL=1
@@ -111,6 +118,19 @@ if [ ! -d "$BENCH" ]; then
   echo "  BENCH=$BENCH is not a directory -- skipped"
 else
   echo "  $(ls "$BENCH"/*.pdb 2>/dev/null | wc -l) backbones x $SEQS designs"
+  # Warm both arms first. The exact worker compiles one Triton kernel (the fused draw); the native tree keeps it in a persistent JIT
+  # root on /scratch, while the image defaults to a per-job directory, so a cold image pays a compile per worker that the native tree
+  # does not. At this size that is most of the wall clock: in 50645953 the image read 18.1 designs/s against native's 31.2 purely
+  # from this. Measure both warm, or measure nothing.
+  WARM=$O/warm; rm -rf "$WARM"; mkdir -p "$WARM"
+  cp "$(ls "$BENCH"/*.pdb 2>/dev/null | head -1)" "$WARM/" 2>/dev/null
+  for arm in image native; do
+    case $arm in
+      image)  "${C[@]}" design --mode exact --input "$WARM" --out "$O/warm_$arm" --seed 37 --num_seq_per_target 1 ;;
+      native) native design --mode exact --hybrid_gemm 0 --input "$WARM" --out "$O/warm_$arm" --seed 37 --num_seq_per_target 1 ;;
+    esac > "warm_$arm.log" 2>&1
+    echo "  warm-up $arm: rc=$? (compiles the draw kernel; not timed)"
+  done
   for arm in image native; do
     d=$O/tput_$arm; rm -rf "$d"; t0=$SECONDS
     case $arm in

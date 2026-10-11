@@ -67,6 +67,9 @@ $C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --pe
   (`--seed`, `--num_seq_per_target`, `--sampling_temp`, `--pdb_path`, `--jsonl_path`, PSSM, residue dictionaries, ...). The kit refuses
   by name, exit 3, the few passes its worker does not re-state — `--ca_only`, `--score_only`, `--tied_positions_jsonl`,
   `--backbone_noise` above 0 — and `--mode off` runs those.
+  - `--mode exact` adds **`--hybrid_gemm 0`** for you, and says so. Fix 2 above: without it the kit refuses the mode by name and
+    designs nothing. Its probe passes on a *single* backbone and fails from two, so the trap is that a one-input trial works and the
+    real run does not. `--hybrid_gemm 1` asks for the lever anyway, and the kit will refuse it.
 - **`dp`** spreads one pass over the GCDs (`scripts/pms_dp.py`). In `exact` it stays byte-identical to **one** stock process however many
   workers it uses: each worker computes every backbone's offset in the single-process RNG stream and designs only its own share of the
   kit's length-sorted batch plan. `--per-gcd 2` was the fastest arrangement measured (402 designs/s against 339 at one worker per GCD).

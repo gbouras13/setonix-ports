@@ -164,24 +164,30 @@ def check_draw():
     """torch on ROCm draws through rocRAND. Its uniform transform differs from cuRAND's, which is what the kit's kernel computes.
 
     tools/pms_drawcheck.py does the comparison (a numpy Philox4x32-10 against the device's exponential_, both transforms); this reads a
-    verdict out of its report: rocRAND must account for every value within 1 ulp, cuRAND must not account for all of them.
+    verdict out of its report.
+
+    THE VERDICT IS ON float64 ONLY, and deliberately. float64 is the path the worker takes -- upstream's probabilities are float64 --
+    and there the two transforms are far enough apart to tell apart: rocRAND accounts for every value, cuRAND for one in 1,512. In
+    float32 they differ by about 2^-33, below the format's own resolution, so both transforms match the same 1,443 of 1,512 values and
+    neither matches all of them. A float32 gate is therefore not a test of anything; reading one as a failure is what this check did on
+    its first run (job 50645953).
     """
     spec = importlib.util.spec_from_file_location("pms_drawcheck", os.path.join(W, "tools", "pms_drawcheck.py"))
     dc = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dc)
-    lines, ok = dc.check_exponential("cuda", (0, 37, 1234), (0, 4, 1024)), True
+    lines, ok, judged = dc.check_exponential("cuda", (0, 37, 1234), (0, 4, 1024)), False, False
     for ln in lines:
         m = COUNTS.search(ln)
-        if not m:
-            ok = False
+        if not m or "float64" not in ln:
             continue
+        judged = True
         total, _, _, ulp_cu, ulp_roc = (int(x) for x in m.groups())
-        if ulp_roc != total or ulp_cu == total:
-            ok = False
+        ok = ulp_roc == total and ulp_cu < total // 2
     lines = list(lines) + [
-        "rocRAND must match every value, cuRAND must not match all of them (the two agree to ~1e-6, which is why the kit's own",
-        "512-draw probe passes here anyway); scripts/pms_worker_boot.py `rocm_draw` replaces the kit's kernel accordingly"]
-    return section("draw", ok, *lines)
+        "float64 is the verdict (the worker's path): rocRAND must account for every value and cuRAND for almost none.",
+        "float32 is reported only -- there the transforms differ by 2^-33, below the format's resolution, so neither is",
+        "distinguishable. scripts/pms_worker_boot.py `rocm_draw` replaces the kit's cuRAND-transform kernel accordingly."]
+    return section("draw", ok and judged, *lines)
 
 
 # ---------------------------------------------------------------------------------------------------------------- design
@@ -192,9 +198,13 @@ def check_design(keep=None):
     common = ["--seed", "37", "--num_seq_per_target", "4", "--sampling_temp", "0.1", "--batch_size", "1"]
     for mode in ("off", "exact"):
         d = os.path.join(out, mode)
+        # --hybrid_gemm 0 before the input: the kit's probe refuses that lever on gfx90a and then refuses the mode by name. It happens
+        # to pass on a single backbone and fails from two, so a one-input check would not have caught its absence (it did not, in
+        # 50645953); this runs the configuration the port actually ships either way.
+        kit = ["--hybrid_gemm", "0"] if mode == "exact" else []
         t0 = time.time()
-        p = subprocess.run(["bash", os.path.join(W, "scripts", "pms-run.sh"), "design", "--mode", mode,
-                            "--input", EXAMPLE, "--out", d] + common, capture_output=True, text=True, timeout=1800)
+        p = subprocess.run(["bash", os.path.join(W, "scripts", "pms-run.sh"), "design", "--mode", mode] + kit +
+                           ["--input", EXAMPLE, "--out", d] + common, capture_output=True, text=True, timeout=1800)
         dirs[mode] = d
         tail = [ln for ln in (p.stdout + p.stderr).splitlines() if ln.strip()][-1:] or ["(no output)"]
         lines.append("%-5s rc=%d  %5.1f s  %s" % (mode, p.returncode, time.time() - t0, tail[0][:110]))

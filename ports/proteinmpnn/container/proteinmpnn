@@ -51,6 +51,22 @@ cmd=${1:-help}
 [ $# -gt 0 ] && shift
 case "$cmd" in
   design)
+    # gfx90a fix 2, applied here so that `design` and `dp` behave alike (pms_dp.py has always passed it). The kit's probe-gated
+    # --hybrid_gemm is not bit-identical on this card, and a mode is all of its levers: the kit then refuses the whole mode by name,
+    # rc 3, nothing designed. `--hybrid_gemm 0` is the kit's own way to ask for the line without that lever. It must come before the
+    # input, because run.sh stops reading its own options at the first it does not know.
+    # The probe is input-dependent -- it passes on a single backbone and fails from two -- so without this a one-input run succeeds and
+    # the same command on a directory fails, which is a trap worth closing.
+    mode=""; seen_hg=0; prev=""
+    for a in "$@"; do
+      [ "$prev" = "--mode" ] && mode=$a
+      [ "$a" = "--hybrid_gemm" ] && seen_hg=1
+      prev=$a
+    done
+    if [ "$mode" = exact ] && [ "$seen_hg" = 0 ]; then
+      note "--mode exact: adding --hybrid_gemm 0 (its probe refuses the lever on gfx90a; pass --hybrid_gemm 1 to ask for it anyway)"
+      set -- --hybrid_gemm 0 "$@"
+    fi
     exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" || exit 97; exec bash "$1/scripts/pms-run.sh" design "${@:2}"' _ "$W" "$@" ;;
   dp)
     exec $CLEAN /bin/bash -c '. "$1/scripts/pms-env.sh" || exit 97; exec python "$1/scripts/pms_dp.py" "${@:2}"' _ "$W" "$@" ;;
