@@ -34,11 +34,24 @@ The kit ships no `fast` tier for ProteinMPNN, so there is no accuracy trade-off 
 
 `ghcr.io/gbouras13/setonix-ports/proteinmpnn`, built by `.github/workflows/proteinmpnn-image.yml`.
 
+- **Tags.**
+  - `:main` is the newest build.
+  - `:8907e667-1` will be the first release, ProteinMPNN commit `8907e667` plus port revision 1 (not published yet). Upstream's last
+    tag, v1.0.1 (2022), is older than that commit, so the commit stands in for the upstream version.
+  - `:8907e667` is the newest port revision of that commit.
+  - A release is the validated image itself, with the same digest (`.github/workflows/release.yml`).
 - **Weights included.** Upstream's repository carries both weight sets (71 MB); the kit's own `run.sh install --weights` checks their
   sha256 against `stock/PINS.json` at build time, for `vanilla` and `soluble` alike. No weights to fetch, no databases, no network.
 - **Pruned to gfx90a.** The torch 2.14.0+rocm7.2 wheel ships a complete ROCm user space of its own; 6.2 GiB of it is GPU kernels for
   other cards (hipBLASLt 4.60 -> 0.21 GiB, rocBLAS 0.63 -> 0.31, aotriton 0.86 -> 0.10, MIOpen's databases 0.76 -> 0.06).
-- **Not yet validated on an MI250X.** `slurm/validate.sbatch` is the check.
+- **Validated on Setonix** (2026-10-11), image `sha-0bfef70`, digest `sha256:0e4f1eb5…` (job 50659780, every section passes):
+  - `proteinmpnn check --design` on all 8 GCDs: every GPU library loaded from inside the image, torch's draw transform rocRAND's in
+    float64, and 3HTN (429 residues) designed stock and `exact` inside the image, byte-identical.
+  - The six upstream examples through native stock, native `exact`, image stock and image `exact`: every pairing byte-identical, 6 of
+    6 designs each, single-GCD `exact` against native included.
+  - `dp --mode exact` on 8 GCDs x 2 workers over 92 backbones: image and native byte-identical, 92 of 92. Designing runs at native
+    speed (6.6 s for the first worker's share in both), but each image worker takes about 17 s longer to start, so this pass took
+    40.7 s against 28.3 s. It is an A/A check at 92 backbones, not the 402 designs/s measured natively over 1,472.
 
 ```bash
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/proteinmpnn:main /scratch/<project>/$USER/singularity
@@ -81,14 +94,15 @@ $C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --pe
 
 ## Validate the image
 
-`slurm/validate.sbatch` takes one GPU node for under an hour:
+`slurm/validate.sbatch` takes one GPU node for about 10 minutes:
 
 - `proteinmpnn check --design` — versions, the kit's pin check for both weight sets, every GPU library loaded from inside the image, a
   matmul on each of the 8 GCDs, torch's uniform transform against both vendors', and upstream's 429-residue `3HTN` designed stock and
   `exact` **inside the image**, bytes compared. That input is past the graph-replay crash threshold, so it checks fix 3 too.
 - the six upstream examples through four routes — native stock, native `exact`, image stock, image `exact` — all pairings compared byte
   for byte.
-- a benchmark pass on all 8 GCDs, image against native, designs/s compared with the 402/s the native port measured.
+- a benchmark pass on all 8 GCDs, image against native, both warmed first: an A/A check at 92 backbones, where start-up is most of
+  the wall clock, not a reproduction of the 402 designs/s measured over 1,472.
 
 ```bash
 sbatch --account=<project>-gpu ports/proteinmpnn/slurm/validate.sbatch SIF=<the .sif> OUT=<dir> NATIVE_W=<native tree>
