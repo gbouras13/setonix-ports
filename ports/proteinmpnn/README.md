@@ -62,8 +62,8 @@ The kit ships no `fast` tier for ProteinMPNN, so there is no accuracy trade-off 
   - For many short runs in one job, run them in one `singularity exec` (a second `dp` there started 12 s sooner), or unpack the image
     to the node's NVMe once and run from that: book it with `--gres=gpu:8,tmp:100G`, then `singularity build --sandbox /tmp/pms-sandbox $SIF`
     (about 13 s) and use `/tmp/pms-sandbox` in place of `$SIF`. Start-up then matches native (9.6 against 8.9 s for 16 backbones on 8 x 2).
-  - Natively it is the first run on a node that starts slowly: 50 s for one process while Lustre's cache is cold, against 8 s from
-    the SIF.
+  - These are warm figures. Natively it is the first run on a node that starts slowly: 50 s for one process while Lustre's cache is
+    cold, against 8 s from the SIF, so a single job on a fresh node may well start sooner from the SIF (not measured at full scale).
 
 ```bash
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/proteinmpnn:main /scratch/<project>/$USER/singularity
