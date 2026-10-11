@@ -32,7 +32,9 @@ B2S_DROPS_EXACT+=";exact:msa_pwa_exact:pin_torch2.12;exact:msa_trans2_exact:pin_
 
 # fast: completes, finite, within stock's band on 1BRS x2 (smoke 5 K2). Since 2026-10-09 (the user's decision) with its sampler
 # roll-out (rollout + dit_hoist + align_jacobi64), which needs DEBUG_CLR_GRAPH_PACKET_CAPTURE=0 (bz-env.sh). HK97 trimer (fastdef F2,
-# job 50579785): 264.5 s = 1.06x stock (0.97x without the roll-out), 1.25 A from stock.
+# job 50579785): 264.5 s = 1.06x stock (0.97x without the roll-out), 1.25 A from stock. Since 2026-10-12 (the user's decision)
+# scripts/b2s_launch.py also puts the kit's triangle-attention block on opt_core's flash kernel for fast on one GCD (B2S_FAST_FLASH=0
+# opts out): 2.12x stock with this recipe, 2.89x with the row patch below (fastflash 50659670).
 B2S_DROPS_FAST="fast:$_B_OPM;fast:$_B_PWA;fast:$_B_LN;fast:$_B_TRIMUL;fast:$_B_TRANS"
 # opt-out: fast WITHOUT its roll-out, as before 2026-10-09 (append to either fast recipe: "$B2S_DROPS_FASTP;$B2S_DROPS_NOROLL")
 B2S_DROPS_NOROLL="fast:$_B_ROLL;fast:$_B_HOIST;fast:$_B_JAC"

@@ -12,7 +12,7 @@ same job:
 |---|---|---|---|
 | `off` | stock `boltz predict`, in the kit's clean subprocess | 1.00x (279 s) | — |
 | `exact` | the kit's exact mode: a graphed sampler roll-out, kernels that keep stock's arithmetic | 1.11-1.13x | **byte-identical** |
-| `fast` | the kit's default mode | 1.06x; **1.22x** with `B2S_FAST_PATCH=1` | 1.25 Å / 2.0 Å CA RMSD, on stock's own arrangement |
+| `fast` | the kit's default mode, with opt_core's flash triangle attention in its fused block | **2.1x**; **2.9x** with `B2S_FAST_PATCH=1` | 1.7 Å CA RMSD, on stock's own arrangement; 0.13 Å from `big` |
 | `big`, one GCD | the kit's memory mode on its flash base (opt_core's flash triangle attention) | **2.5-2.7x** | within 0.06-0.15 Å of the kit's shipped big |
 | `big --n_gpu 2` | row-sharded over two GCDs of the node | **2.2x** | 0.38 Å |
 
@@ -50,6 +50,10 @@ None of these is an edit to a kit file (`af3-setonix/BOLTZ2_PORT.md` has the mea
 4. **The kit's flash triangle attention, retuned.** One-GCD big runs the kit's flash base with ROWS=1 tiles (the ROWS>=2 mask scan does
    not compile on gfx90a / Triton 3.8); `--n_gpu P` gets OpenFold3's tiles and RCCL words. Both are `scripts/b2s_launch.py` defaults
    (`B2S_BIG_FLASH=0` / `B2S_TP_SPEED=0` opt out).
+5. **fast's fused block, allowed to serve.** The kit's fused triangle-attention block serves only when boltz asks for kernels, and the
+   port must run kernels off, so fast ran stock's chunked attention. `scripts/b2s_launch.py` puts the block on its `flash` variant
+   (opt_core's own kernel, no cuEquivariance), and the boot word `pairblock_kernels` lets it serve under kernels off. Every call it
+   declines runs stock's code exactly as before. `B2S_FAST_FLASH=0` opts out.
 
 ## Using the image
 

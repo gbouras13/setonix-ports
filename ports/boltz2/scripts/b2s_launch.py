@@ -59,10 +59,13 @@ Switches (the B2S_ prefix is outside every name family the kit strips or refuses
                     the kernel big's flash base serves. Needs the boot word pairblock_kernels, without which the block never serves under
                     the kernels-off route.
 
-  B2S_FAST_FLASH=1  OPT-IN experiment (2026-10-11, not validated): for `pred --mode fast` on one GCD, B2S_FAST_PAIRBLOCK=flash,
-                    OF3T_FLASH_IP=ieee and B2S_TRIATTN_CONFIG=128,32,1,4,1,1 (set only where the caller has not set them) and the boot
-                    words pairblock_kernels + triattn_tiles. Why: on gfx90a fast's whole pair track stands aside (kernels_off), so its
-                    triangle attention runs stock's chunked code, the cost big's flash base removed (2.5x stock on one GCD).
+  B2S_FAST_FLASH=0  opt out of fast's flash kernel, which is ON BY DEFAULT for `pred --mode fast` (and a `pred` with no mode, the kit's
+                    default) on one GCD (the user's decision, 2026-10-12): B2S_FAST_PAIRBLOCK=flash, OF3T_FLASH_IP=ieee and
+                    B2S_TRIATTN_CONFIG=128,32,1,4,1,1 (set only where the caller has not set them) and the boot words
+                    pairblock_kernels + triattn_tiles. Why: on gfx90a fast's whole pair track stands aside (kernels_off), so its
+                    triangle attention ran stock's chunked code, the cost big's flash base removed. Measured (fastflash 50659670):
+                    fast + row patch 2.89x stock on the HK97 trimer (1.24x without the flash kernel), deterministic, 0.13 A from
+                    the big default; the 2,310-token 6-mer fits, 5.8x faster.
 
   B2S_LAUNCH_QUIET=1   no ``[b2s-launch]`` line.
 """
@@ -163,9 +166,10 @@ FAST_PAIRBLOCK_VARIANTS = ("flash", "k2b")
 
 
 def fast_flash_defaults(argv) -> str:
-    """fast's flash experiment, OPT-IN (B2S_FAST_FLASH=1) for `pred --mode fast` on one GCD. Returns what was set ('' when nothing)."""
+    """fast's flash kernel, on by default for `pred --mode fast` on one GCD (B2S_FAST_FLASH=0 opts out). Returns what was set ('' when
+    nothing)."""
     args = list(argv or [])
-    if os.environ.get("B2S_FAST_FLASH", "0").strip() != "1":
+    if os.environ.get("B2S_FAST_FLASH", "1").strip() == "0":
         return ""
     if not args or args[0] != "pred" or _mode(args) != "fast" or _n_gpu(args) > 1:
         return ""
@@ -284,7 +288,7 @@ def main(argv=None) -> int:
         _say(f"big_flash=on ({bf}; B2S_BIG_FLASH=0 opts out)")
     ff = fast_flash_defaults(args)
     if ff:
-        _say(f"fast_flash=on ({ff}; opt-in B2S_FAST_FLASH=1, not validated)")
+        _say(f"fast_flash=on ({ff}; B2S_FAST_FLASH=0 opts out)")
     apply()
     from boltz2_opt.__main__ import main as kit_main     # the kit's own entry: core pin gate, module check, then cli.main
     return kit_main(argv)

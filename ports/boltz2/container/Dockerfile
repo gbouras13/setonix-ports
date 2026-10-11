@@ -15,7 +15,8 @@
 #     that cannot run here (NVRTC / cuda.bindings units, H100 tile configs over gfx90a's 64 KB LDS, two torch-pinned units);
 #   - HIP_LAUNCH_BLOCKING=1 (stock itself segfaults above ~500 tokens without it) and DEBUG_CLR_GRAPH_PACKET_CAPTURE=0 (ROCm 7.2 corrupts
 #     the host heap replaying a captured graph: fast's sampler roll-out), both scripts/bz-env.sh defaults;
-#   - one-GCD big runs the kit's flash base with ROWS=1 tiles, --n_gpu P the OpenFold3 tiles and RCCL words (scripts/b2s_launch.py).
+#   - one-GCD big runs the kit's flash base with ROWS=1 tiles, --n_gpu P the OpenFold3 tiles and RCCL words, and fast's fused
+#     triangle-attention block serves opt_core's flash kernel under kernels off (scripts/b2s_launch.py, scripts/b2s_worker_boot.py).
 #
 # Run on Setonix WITHOUT --rocm (it binds the host's ROCm 6.3.0 libraries, same sonames). `boltz2 check` fails if any GPU library was
 # loaded from outside the image. Images cannot be built on Setonix; GitHub Actions builds this one (.github/workflows/boltz2-image.yml).

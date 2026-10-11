@@ -52,8 +52,9 @@ B2S_WORKER_PATCHES (comma list):
                      use_kernels flag, and the port must run kernels off (no cuEquivariance on ROCm), so the block never served. The
                      block's apply() is wrapped: before it, TriangleAttention.forward becomes stock's forward with use_kernels forced
                      False (the block keeps the forward it finds as its fallback, so every declined call runs stock's code exactly as
-                     now); after it, one outer forward hands the block use_kernels=True. Any other variant is left alone. Opt-in, for
-                     fast's flash experiment (b2s_launch.py B2S_FAST_FLASH=1); 2026-10-11, not validated yet.
+                     now); after it, one outer forward hands the block use_kernels=True. Any other variant is left alone. Added for
+                     fast on one GCD by b2s_launch.py's fast flash default (2026-10-12; B2S_FAST_FLASH=0 opts out). Measured
+                     (fastflash 50659670): 2.89x stock with the row patch, deterministic, 0.13 A from the big default.
 Every refusal word contains `b2s` so it can be read back from the worker log's census lines.
 """
 from __future__ import annotations

@@ -9,7 +9,7 @@
 
 # The boltz2 image against the native port, on one Setonix GPU node (8 MI250X GCDs).
 #   sbatch --account=<project>-gpu validate.sbatch SIF=<the .sif> OUT=<dir> NATIVE_D=<the native boltz2-setonix tree> \
-#          [REF=<native outputs, default $NATIVE_D/out/fastdef.50579785>] [WEIGHTS=<default $NATIVE_D/weights>] [PARTS=check,bytes,fetch]
+#          [REF=<native outputs, default $NATIVE_D/out/fastdef2.50669039>] [WEIGHTS=<default $NATIVE_D/weights>] [PARTS=check,bytes,fetch]
 #   (arguments, not variables: Setonix sets SBATCH_EXPORT=NONE). PARTS picks the sections, default all three.
 #
 # 1. check  `boltz2 check --predict`: versions, the kit's pin check, the weights through the kit's own weights verb, every GPU library
@@ -17,8 +17,9 @@
 #           stock and through exact inside the image, compared byte for byte (exact replays a captured graph: DEBUG_CLR_GRAPH_PACKET_
 #           CAPTURE=0 must be in force).
 # 2. bytes  the HK97 capsid trimer with its MSA (1,155 tokens), seed 1, upstream settings, in the image, laid out as the native job
-#           50579785 ran it (one GCD each, the sharded run on two): stock, exact, fast, fast with the row patch, the one-GCD big default
-#           and big --n_gpu 2. Each against its native output, byte for byte. This is the question the image has to answer: an
+#           50669039 ran it (one GCD each, the sharded run on two): stock, exact, fast and fast with the row patch (both on the flash
+#           kernel, fast's default since 2026-10-12), the one-GCD big default and big --n_gpu 2. Each against its native output, byte
+#           for byte. This is the question the image has to answer: an
 #           interpreter built elsewhere (python-build-standalone 3.12.12, not the OpenFold3 env's 3.12.14), a flat venv instead of the
 #           layered one, and torch's ROCm kernels pruned to gfx90a must still produce the native bytes in every mode.
 # 3. fetch  `boltz2 fetch-weights` into node-local disk: the four files from Hugging Face, each checked against the kit's pinned sha256
@@ -33,7 +34,7 @@ done
 PARTS=${PARTS:-check,bytes,fetch}
 has() { case ",$PARTS," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 : "${SIF:?SIF=}" "${OUT:?OUT=}" "${NATIVE_D:?NATIVE_D=}"
-REF=${REF:-$NATIVE_D/out/fastdef.50579785}
+REF=${REF:-$NATIVE_D/out/fastdef2.50669039}
 WEIGHTS=${WEIGHTS:-$NATIVE_D/weights}
 YH=$NATIVE_D/queries/hk97/hk97_trimer_msa.yaml
 O=$OUT/validate.${SLURM_JOB_ID:-local}
@@ -71,8 +72,8 @@ fi
 
 # ---------------------------------------------------------------------------------------------------- 2. bytes
 if has bytes; then
-note "2. HK97 trimer (1,155 tokens), seed 1, upstream settings: every mode in the image against the native job 50579785"
-# tag  GCDs  extra environment  mode arguments          (as the native fastdef.sbatch ran them)
+note "2. HK97 trimer (1,155 tokens), seed 1, upstream settings: every mode in the image against the native job 50669039"
+# tag  GCDs  extra environment  mode arguments          (as the native fastdef2.sbatch ran them)
 RUNS=("F1|0|B2S_FAST_PATCH=1|--mode fast"
       "F2|1||--mode fast"
       "E1|2||--mode exact"
