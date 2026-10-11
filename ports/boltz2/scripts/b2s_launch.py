@@ -54,6 +54,16 @@ Switches (the B2S_ prefix is outside every name family the kit strips or refuses
                     Card drops naming the pair track's own levers (pairblock, pairblock_c64, fused_transition, pairfuse, condproj),
                     which the flash row does not carry, are skipped with a note.
 
+  B2S_FAST_PAIRBLOCK=flash|k2b   fast's fused triangle-attention block (boltz2_opt.pairblock, switch BOLTZ_PAIRBLOCK; fast's row ships
+                    `default`) on that variant: opt_core's flash triangle attention (or its K2B kernel) as the block's attention core,
+                    the kernel big's flash base serves. Needs the boot word pairblock_kernels, without which the block never serves under
+                    the kernels-off route.
+
+  B2S_FAST_FLASH=1  OPT-IN experiment (2026-10-11, not validated): for `pred --mode fast` on one GCD, B2S_FAST_PAIRBLOCK=flash,
+                    OF3T_FLASH_IP=ieee and B2S_TRIATTN_CONFIG=128,32,1,4,1,1 (set only where the caller has not set them) and the boot
+                    words pairblock_kernels + triattn_tiles. Why: on gfx90a fast's whole pair track stands aside (kernels_off), so its
+                    triangle attention runs stock's chunked code, the cost big's flash base removed (2.5x stock on one GCD).
+
   B2S_LAUNCH_QUIET=1   no ``[b2s-launch]`` line.
 """
 from __future__ import annotations
@@ -147,6 +157,32 @@ def big_flash_defaults(argv) -> str:
     return ",".join(set_now) or "already-set"
 
 
+FAST_FLASH_ENV = {"B2S_FAST_PAIRBLOCK": "flash", "OF3T_FLASH_IP": "ieee", "B2S_TRIATTN_CONFIG": "128,32,1,4,1,1"}
+FAST_FLASH_PATCHES = ("pairblock_kernels", "triattn_tiles")
+FAST_PAIRBLOCK_VARIANTS = ("flash", "k2b")
+
+
+def fast_flash_defaults(argv) -> str:
+    """fast's flash experiment, OPT-IN (B2S_FAST_FLASH=1) for `pred --mode fast` on one GCD. Returns what was set ('' when nothing)."""
+    args = list(argv or [])
+    if os.environ.get("B2S_FAST_FLASH", "0").strip() != "1":
+        return ""
+    if not args or args[0] != "pred" or _mode(args) != "fast" or _n_gpu(args) > 1:
+        return ""
+    set_now = []
+    for k, v in FAST_FLASH_ENV.items():
+        if k not in os.environ:
+            os.environ[k] = v
+            set_now.append(f"{k}={v}")
+    patches = [p.strip() for p in os.environ.get("B2S_WORKER_PATCHES", "").split(",") if p.strip()]
+    for p in FAST_FLASH_PATCHES:
+        if p not in patches:
+            patches.append(p)
+            set_now.append(p)
+    os.environ["B2S_WORKER_PATCHES"] = ",".join(patches)
+    return ",".join(set_now) or "already-set"
+
+
 def _compose_big_row(M, base: str) -> dict:
     """`big`'s row as the kit's own modes.py composes it with BIG_ATTN_BASE = <base>: the module's source executed once more in a private
     namespace with that one constant changed (modes.py imports only the standard library and .registry). Nothing on disk changes."""
@@ -181,6 +217,15 @@ def apply() -> dict:
                 M.MODES["big"]["env"] = {k: v for k, v in M.MODES["big"]["env"].items() if k != "BOLTZ_TRANSITION"}
             M.BIG_ATTN_BASE = base
         done["big_base"] = base
+    fpb = os.environ.get("B2S_FAST_PAIRBLOCK", "").strip().lower()
+    if fpb:
+        if fpb not in FAST_PAIRBLOCK_VARIANTS:
+            raise SystemExit(f"[b2s-launch] B2S_FAST_PAIRBLOCK must be one of {','.join(FAST_PAIRBLOCK_VARIANTS)}, not {fpb!r}")
+        env = M.MODES["fast"]["env"]
+        if "BOLTZ_PAIRBLOCK" not in env:
+            raise SystemExit("[b2s-launch] B2S_FAST_PAIRBLOCK: fast's row carries no BOLTZ_PAIRBLOCK word to set")
+        M.MODES["fast"]["env"] = dict(env, BOLTZ_PAIRBLOCK=fpb)
+        done["fast_pairblock"] = f"{env['BOLTZ_PAIRBLOCK']}->{fpb}"
     kern = os.environ.get("B2S_KERNELS", "").strip().lower()
     if kern:
         if kern not in ("on", "off"):
@@ -224,6 +269,7 @@ def apply() -> dict:
         done["worker_patches"] = wp
     _say(f"kernels={done['kernels'] or 'as-shipped'} card_drops={','.join(done['card_drops']) or '-'} worker_patches={done.get('worker_patches') or '-'}"
          + (f" big_base={done['big_base']}" if done.get("big_base") else "")
+         + (f" fast_pairblock={done['fast_pairblock']}" if done.get("fast_pairblock") else "")
          + (f" skipped_drops={','.join(done['skipped_drops'])}(not_in_flash_row)" if done.get("skipped_drops") else ""))
     return done
 
@@ -236,6 +282,9 @@ def main(argv=None) -> int:
     bf = big_flash_defaults(args)
     if bf:
         _say(f"big_flash=on ({bf}; B2S_BIG_FLASH=0 opts out)")
+    ff = fast_flash_defaults(args)
+    if ff:
+        _say(f"fast_flash=on ({ff}; opt-in B2S_FAST_FLASH=1, not validated)")
     apply()
     from boltz2_opt.__main__ import main as kit_main     # the kit's own entry: core pin gate, module check, then cli.main
     return kit_main(argv)

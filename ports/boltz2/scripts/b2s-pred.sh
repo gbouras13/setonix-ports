@@ -8,7 +8,9 @@
 #   off           the kit's own run.sh, `pred --mode off ... --no_kernels`: stock boltz in the kit's clean, self-proving subprocess
 #   exact         B2S_KERNELS=off B2S_CARD_DROPS=$B2S_DROPS_EXACT                              byte-identical to stock
 #   fast          B2S_KERNELS=off B2S_CARD_DROPS=$B2S_DROPS_FAST                               (B2S_FAST_PATCH=1: $B2S_DROPS_FASTP +
-#                                                                                               the opt-in row patch, 1.22x instead of 1.06x)
+#                                                                                               the opt-in row patch, 1.22x instead of 1.06x;
+#                                                                                               B2S_FAST_FLASH=1 adds opt_core's flash kernel
+#                                                                                               in the kit's block: 2.9x with the patch, opt-in)
 #   big           B2S_KERNELS=off B2S_CARD_DROPS=$B2S_DROPS_BIGP                               one GCD; scripts/b2s_launch.py makes it the
 #                                                                                               flash recipe (B2S_BIG_FLASH=0 opts out)
 #   big --n_gpu P B2S_KERNELS=off OF3T_FLASH_IP=ieee B2S_CARD_DROPS=$B2S_DROPS_BIGTP           row-sharded over P GCDs of one node, with

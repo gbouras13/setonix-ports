@@ -47,6 +47,13 @@ B2S_WORKER_PATCHES (comma list):
                      gfx90a retune of the same kernel (bitwise there; 6,930-token block 5.67 -> 3.48 s). The kit strips PTX_TRIATTN_*
                      from the worker environment (stock/PINS.json must_be_absent_prefixes), so it is set here, inside the worker and
                      every rank, before anything imports the kernel.
+  pairblock_kernels  lets the kit's fused triangle-attention block (boltz2_opt.pairblock) serve under the kernels-off route when its
+                     variant's attention core is opt_core's own (BOLTZ_PAIRBLOCK=flash | k2b): the block's gate is boltz's own
+                     use_kernels flag, and the port must run kernels off (no cuEquivariance on ROCm), so the block never served. The
+                     block's apply() is wrapped: before it, TriangleAttention.forward becomes stock's forward with use_kernels forced
+                     False (the block keeps the forward it finds as its fallback, so every declined call runs stock's code exactly as
+                     now); after it, one outer forward hands the block use_kernels=True. Any other variant is left alone. Opt-in, for
+                     fast's flash experiment (b2s_launch.py B2S_FAST_FLASH=1); 2026-10-11, not validated yet.
 Every refusal word contains `b2s` so it can be read back from the worker log's census lines.
 """
 from __future__ import annotations
@@ -57,7 +64,8 @@ import runpy
 import sys
 
 PATCHES = tuple(p.strip() for p in os.environ.get("B2S_WORKER_PATCHES", "").split(",") if p.strip())
-KNOWN = ("transition_no_v2", "trimul_v4_only", "trimul_no_native", "alloc_no_expandable", "xl_no_expandable", "triattn_tiles")
+KNOWN = ("transition_no_v2", "trimul_v4_only", "trimul_no_native", "alloc_no_expandable", "xl_no_expandable", "triattn_tiles",
+         "pairblock_kernels")
 BOOT_ONLY = ("alloc_no_expandable", "triattn_tiles")  # act on the environment at boot, no module hook
 TORCH_CONF = "PYTORCH_CUDA_ALLOC_CONF"
 TRIATTN_TILES_DEFAULT = "128,32,2,4,1,1"
@@ -159,10 +167,54 @@ def _set_triattn_tiles() -> None:
          f"kernels read it at import")
 
 
+PAIRBLOCK_OWN_CORES = ("flash", "k2b")       # the pair block's variants whose attention core is opt_core's own kernel (no cuEquivariance)
+
+
+def _patch_pairblock(mod) -> None:
+    orig_apply = mod.apply
+
+    def apply(spec=None):
+        import boltz.model.layers.triangular_attention.attention as A
+        stock = A.TriangleAttention.forward
+        if not getattr(stock, "_b2s_kernels_off", False):
+            def stock_kernels_off(self, x, mask=None, chunk_size=None, use_kernels=False):
+                # Every call the kit's block does not serve lands here (the block keeps the forward it found as its fallback) and runs
+                # stock's own code exactly as the kernels-off route does: cuEquivariance is never asked for.
+                return stock(self, x, mask=mask, chunk_size=chunk_size, use_kernels=False)
+
+            stock_kernels_off._b2s_kernels_off = True
+            stock_kernels_off.__wrapped__ = stock
+            A.TriangleAttention.forward = stock_kernels_off
+        out = orig_apply(spec)
+        block = A.TriangleAttention.forward
+        v = (getattr(mod, "_STATE", None) or {}).get("variant")
+        if getattr(block, "_b2s_kernels_off", False) or v not in PAIRBLOCK_OWN_CORES:
+            _say(f"pairblock_kernels: the kit's block is {'not applied' if getattr(block, '_b2s_kernels_off', False) else 'variant ' + str(v)}; "
+                 f"left on the kernels-off route (serves only with an opt_core core: {','.join(PAIRBLOCK_OWN_CORES)})")
+            return out
+
+        def forward(self, x, mask=None, chunk_size=None, use_kernels=False):
+            # The kit's block serves only when boltz asks for kernels (its gate is boltz's own use_kernels flag), and the port runs
+            # kernels off because cuEquivariance does not exist on ROCm. With an opt_core core the block needs no cuEquivariance, so
+            # it is asked to serve; whatever it declines reaches stock_kernels_off above.
+            return block(self, x, mask, chunk_size, True)
+
+        forward.__wrapped__ = block
+        A.TriangleAttention.forward = forward
+        _say(f"pairblock_kernels: the kit's fused triangle-attention block (variant {v}: opt_core's own attention core) serves under the "
+             f"kernels-off route; every call it declines runs stock's code with use_kernels=False")
+        return out
+
+    apply.__wrapped__ = orig_apply
+    mod.apply = apply
+    _say("patch pairblock_kernels: boltz2_opt.pairblock.apply wrapped (takes effect when the kit attaches its block)")
+
+
 HOOKS = {"transition_no_v2": ("opt_core.kernels.transition", _patch_transition),
          "trimul_v4_only": ("opt_core.kernels.trimul", _patch_trimul),
          "trimul_no_native": ("opt_core.kernels.trimul", _patch_trimul),
-         "xl_no_expandable": ("boltz2_opt.big", _patch_big)}
+         "xl_no_expandable": ("boltz2_opt.big", _patch_big),
+         "pairblock_kernels": ("boltz2_opt.pairblock", _patch_pairblock)}
 
 
 class _PostImport(importlib.abc.MetaPathFinder):
