@@ -1,0 +1,72 @@
+diff --git a/csrc/layer_norm_cuda_kernel.cu b/csrc/layer_norm_cuda_kernel.cu
+index df1ff68..43c2a98 100644
+--- a/csrc/layer_norm_cuda_kernel.cu
++++ b/csrc/layer_norm_cuda_kernel.cu
+@@ -88,11 +88,11 @@ __device__ void cuWelfordMuSigma2(const T* __restrict__ vals, const int n1, cons
+     }
+     // intra-warp reductions
+     for (int l = 0; l <= 4; ++l) {
+-      int srcLaneB = (threadIdx.x + (1 << l)) & 31;
+-      U sigma2B = WARP_SHFL(sigma2, srcLaneB);
++      int srcLaneB = (threadIdx.x + (1 << l)) & (blockDim.x - 1);
++      U sigma2B = WARP_SHFL(sigma2, srcLaneB, blockDim.x);
+       if (!rms_only) {
+-        U muB = WARP_SHFL(mu, srcLaneB);
+-        U countB = WARP_SHFL(count, srcLaneB);
++        U muB = WARP_SHFL(mu, srcLaneB, blockDim.x);
++        U countB = WARP_SHFL(count, srcLaneB, blockDim.x);
+         cuChanOnlineSum<U>(muB, sigma2B, countB, mu, sigma2, count);
+       } else {
+         cuChanRMSOnlineSum<U>(sigma2B, sigma2);
+@@ -142,9 +142,9 @@ __device__ void cuWelfordMuSigma2(const T* __restrict__ vals, const int n1, cons
+       // don't care about final value of count, we know count == n2
+     } else {
+       if (!rms_only) {
+-        mu = WARP_SHFL(mu, 0);
++        mu = WARP_SHFL(mu, 0, blockDim.x);
+       }
+-      sigma2 = WARP_SHFL(sigma2 / U(n2), 0);
++      sigma2 = WARP_SHFL(sigma2 / U(n2), 0, blockDim.x);
+     }
+   }
+ }
+@@ -205,11 +205,11 @@ __device__ void cuWelfordMuSigma2(const at::Half* __restrict__ vals, const int n
+     }
+     // intra-warp reductions
+     for (int l = 0; l <= 4; ++l) {
+-      int srcLaneB = (threadIdx.x + (1 << l)) & 31;
+-      float sigma2B = WARP_SHFL(sigma2, srcLaneB);
++      int srcLaneB = (threadIdx.x + (1 << l)) & (blockDim.x - 1);
++      float sigma2B = WARP_SHFL(sigma2, srcLaneB, blockDim.x);
+       if (!rms_only) {
+-        float muB = WARP_SHFL(mu, srcLaneB);
+-        float countB = WARP_SHFL(count, srcLaneB);
++        float muB = WARP_SHFL(mu, srcLaneB, blockDim.x);
++        float countB = WARP_SHFL(count, srcLaneB, blockDim.x);
+         cuChanOnlineSum(muB, sigma2B, countB, mu, sigma2, count);
+       } else {
+         cuChanRMSOnlineSum(sigma2B, sigma2);
+@@ -259,9 +259,9 @@ __device__ void cuWelfordMuSigma2(const at::Half* __restrict__ vals, const int n
+       // don't care about final value of count, we know count == n2
+     } else {
+       if (!rms_only) {
+-        mu = WARP_SHFL(mu, 0);
++        mu = WARP_SHFL(mu, 0, blockDim.x);
+       }
+-      sigma2 = WARP_SHFL(sigma2 / float(n2), 0);
++      sigma2 = WARP_SHFL(sigma2 / float(n2), 0, blockDim.x);
+     }
+   }
+ }
+@@ -702,9 +702,9 @@ __global__ void cuComputeGradInput(const V* __restrict__ dout, const T* __restri
+     // intra-warp reductions
+     for (int mask = blockDim.x / 2; mask > 0; mask /= 2) {
+       if (!rms_only) {
+-        sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
++        sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask, blockDim.x);
+       }
+-      sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask);
++      sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask, blockDim.x);
+     }
+     // inter-warp reductions
+     if (blockDim.y > 1) {
