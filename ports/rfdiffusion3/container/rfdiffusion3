@@ -1,0 +1,95 @@
+#!/bin/sh
+# rfdiffusion3 -- entry point of the RFdiffusion3 Setonix image (ports/rfdiffusion3). It keeps the host's software environment out and
+# runs the port's own scripts on the image's tree, /opt/rfdiffusion3: the same tree a native install has, with the TWO interpreters this
+# kit needs (venv-stock pristine for `--mode off`, venv-kit with the ten-file overlay for exact / fast).
+# POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV, which bash would source. Run WITHOUT --rocm.
+#
+#   rfdiffusion3 design --mode off|exact|fast [--det 0|1] inputs=SPEC.json out_dir=DIR [key=value ...]
+#                                  one GCD. off = stock `rfd3 design` in the pristine interpreter; exact = the kit's fast line, which
+#                                  produces stock's designs on this card; fast = faster again, with its own numerics. Every key=value
+#                                  is upstream's own setting, passed through (n_batches=, diffusion_batch_size=, seed=, ...)
+#   rfdiffusion3 check [--no-gpu]  versions, pins, the overlay's state in both interpreters, GPUs, apex's RMSNorm against a float64
+#                                  reference (the fix this card needs), and where every GPU library was loaded from
+#   rfdiffusion3 fetch DIR         upstream's checkpoint (2.7 GB) into DIR with the kit's own verb, then its sha256 against the kit's
+#                                  stock/PINS.json. Needs network; the image ships no weights
+#   rfdiffusion3 compare A B       two output directories design by design (tools/rfd_compare.py)
+#   rfdiffusion3 sanity DIR        are the designs protein-like at all: CA-CA spacing, radius of gyration, clashes (tools/rfd_sanity.py)
+#   rfdiffusion3 kit ...           the kit's own run.sh, unpatched: `kit check --mode exact`, `kit warm --mode fast`, ...
+#   rfdiffusion3 version | python ... | shell ... | help
+#
+# THE CHECKPOINT IS NOT IN THE IMAGE. Mount it: `-B /path/to/weights:/weights` puts it where RFD3_CKPT points by default
+# (/weights/rfd3/rfd3_latest.ckpt); or pass `--ckpt FILE`, or set RFD3_CKPT.
+#
+# Two gfx90a fixes are ON by default and the run says so: apex is built with the 64-lane wavefront patch (without it no design is a
+# protein), and RFD_BOOT=fzt_rows_off makes the kit's fused transition step aside, without which `exact` is not stock's designs. The
+# kit's own APPLIED line reports `fused_calls=0` when the second one is working. RFD_BOOT= (empty) turns it off.
+#
+# Setonix starts every job from a fresh login environment (SBATCH_EXPORT=NONE), so set what you need inside the job script. Scratch for
+# temporaries and the compiled kernels: RFD_LOCAL (default a per-user directory under TMPDIR); point MODEL_OPT_JIT_ROOT at /scratch to
+# keep the compile caches between jobs -- worth it, a cold inductor cache costs `fast` about 75 s.
+set -eu
+
+note() { printf '[rfdiffusion3] %s\n' "$*" >&2; }
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` function are dropped. Slurm's variables, ROCR_VISIBLE_DEVICES and the port's RFD_* / MODEL_OPT_* /
+#    RFDIFFUSION3_* words pass through. The kit itself refuses a preset RFD3_* lever switch by name, which is its own guard.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT HIP_PATH HSA_PATH ROCM_HOME \
+         HIP_PLATFORM BASH_ENV ENV LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_; do
+  unset "$v" 2>/dev/null || true
+done
+W=/opt/rfdiffusion3
+export RFD_ROOT=$W ROCM_PATH=/opt/rocm PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+       PATH=$W/scripts/bin:$W/venv-kit/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+
+# 2. Writable scratch outside $HOME (1 GB quota on Setonix) and outside the read-only image.
+T=${RFD_LOCAL:-${TMPDIR:-/tmp}/rfd-$(id -u)}
+mkdir -p "$T" 2>/dev/null || T=$(mktemp -d)
+export RFD_LOCAL="$T" MODEL_OPT_JIT_ROOT="${MODEL_OPT_JIT_ROOT:-$T/jit}"
+
+# 3. Every verb sources the port's own scripts/rfd-env.sh first: the two interpreters, the nvidia-smi shim (the kit identifies the GPU
+#    with it alone), the kit's paths, the cache directories, DEBUG_CLR_GRAPH_PACKET_CAPTURE=0 and RFD_BOOT. It returns 97 if the tree
+#    is incomplete. `--config h100` is added to the kit's verbs because that is the file the kit fills its own defaults from; every
+#    value it sets is already pre-set here, so it changes nothing but runs the kit's own probes.
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  design|warm)
+    seen_cfg=0
+    for a in "$@"; do case "$a" in --config|--config=*) seen_cfg=1 ;; esac; done
+    [ "$seen_cfg" = 0 ] && set -- --config h100 "$@"
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" kit || exit 97
+                              exec bash "$1/kit/rfdiffusion3/run.sh" "$2" "${@:3}"' _ "$W" "$cmd" "$@" ;;
+  kit)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" kit || exit 97
+                              exec bash "$1/kit/rfdiffusion3/run.sh" "${@:2}"' _ "$W" "$@" ;;
+  fetch)
+    [ $# -ge 1 ] || { note "fetch needs a directory (it is mounted, not in the image)"; exit 2; }
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" stock > /dev/null || exit 97
+                              exec python -m rfdiffusion3_opt.weights "${@:2}"' _ "$W" "$@" ;;
+  compare)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" kit > /dev/null 2>&1 || exit 97
+                              exec python "$1/tools/rfd_compare.py" "${@:2}"' _ "$W" "$@" ;;
+  sanity)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" kit > /dev/null 2>&1 || exit 97
+                              exec python "$1/tools/rfd_sanity.py" "${@:2}"' _ "$W" "$@" ;;
+  rmsnorm)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" kit > /dev/null 2>&1 || exit 97
+                              exec python "$1/tools/rfd_rmsnorm_check.py" "${@:2}"' _ "$W" "$@" ;;
+  check)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" kit > /dev/null 2>&1 || exit 97
+                              exec python "$1/container/rfdiffusion3_check.py" "${@:2}"' _ "$W" "$@" ;;
+  version)
+    cat $W/source.txt $W/kit.txt $W/upstream.txt $W/apex.txt $W/rocm-packages.txt 2>/dev/null
+    sed -n 's/^\(torch\|triton-rocm\|numpy\|rc-foundry\|apex\)==/\1 /p' $W/environment/image-freeze-venv-kit.txt 2>/dev/null
+    exit 0 ;;
+  python)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/rfd-env.sh" kit > /dev/null 2>&1; exec python "${@:2}"' _ "$W" "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (rfdiffusion3 help)"; exit 2 ;;
+esac
