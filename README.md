@@ -13,7 +13,8 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 | [`proteinmpnn`](ports/proteinmpnn/) | ProteinMPNN inverse folding, byte-identical to stock and 11.6x faster per GCD | runner, boot patch, data-parallel driver, image `ghcr.io/gbouras13/setonix-ports/proteinmpnn`, validation job |
 | [`boltz2`](ports/boltz2/) | Boltz-2 2.2.1 with every kit mode: `exact` byte-identical to stock, `big` 2.5x on one GCD, up to 15,785 tokens on a node | recipes, launcher, boot patch, weights fetch, image `ghcr.io/gbouras13/setonix-ports/boltz2`, validation job |
 | [`protenix`](ports/protenix/) | Protenix v2 with the kit's `big` line: one GCD byte-identical to stock, or row-sharded over a node | launcher, checks, image `ghcr.io/gbouras13/setonix-ports/protenix`, validation job |
-| `openfold3`, `opendde` | | not yet: ported and validated on Setonix, to follow here |
+| [`opendde`](ports/opendde/) | OpenDDE 1.1.1 on the kit's big line, one GCD or row-sharded over a node: 2.45x stock at 4,096 tokens, complete to 9,216 | hook chain of eight opt-in fixes, self-check, image `ghcr.io/gbouras13/setonix-ports/opendde`, validation job (not yet run) |
+| `openfold3` | | not yet: ported and validated on Setonix, to follow here |
 
 ## Using an image on Setonix
 

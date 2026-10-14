@@ -1,0 +1,98 @@
+#!/bin/sh
+# opendde -- entry point of the OpenDDE Setonix image (ports/opendde). It keeps the host's software environment out and runs the port's
+# own scripts on the image's tree, /opt/opendde: the native port's tree (venv/, kit/, patches/, scripts/, tools/), without weights.
+# POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV, which bash would source. Run WITHOUT --rocm.
+#
+#   opendde fetch-weights DIR       the weights root into DIR with the kit's own downloader (upstream's URL table): the checkpoint
+#                                   (2.6 GB, Hugging Face aurekaresearch/OpenDDE) and the four common/ files (0.6 GB), each checked
+#                                   against the kit's pinned sha256. Once; a file already there is kept and only checked
+#   opendde pred [--weights DIR] [--stock] [--n_gpu 1|2|4|8] -i QUERY.json -o OUT [opendde_opt pred / upstream options]
+#                                   one prediction on the kit's big line (scripts/odde-pred.sh):
+#                                     default   the port's patched line: stock plus eight opt-in fixes (2.45x stock at 4,096 tokens
+#                                               on 8 GCDs, structure inside run-to-run noise; completes 8,192 and 9,216 tokens)
+#                                     --stock   the kit's big line as shipped
+#                                   --n_gpu P row-shards it over P GCDs of one node (one sharded prediction per node). Shipped
+#                                   settings otherwise (10 cycles, 200 steps, 5 samples, MSA/templates as the input asks)
+#   opendde compare A.cif B.cif     CA RMSD between two structures of the same input (same sample index)
+#   opendde check [--no-gpu] [--weights DIR] [--patch-tests] [--predict] [--keep DIR]
+#                                   versions, pins, GPUs, where every GPU library was loaded from; --patch-tests, the patches' CPU
+#                                   tests; with weights, their digests, and with --predict a 600-token prediction (--det 1, one GCD)
+#                                   through stock and through the patched line, each compared byte for byte with the reference
+#   opendde kit ...                 the kit's own run.sh, unpatched (e.g. `kit check --mode big`)
+#   opendde version | python ... | shell ... | help
+#
+# Weights: --weights DIR or ODDE_WEIGHTS=DIR. Setonix starts every job from a fresh login environment (SBATCH_EXPORT=NONE), so set what
+# you need inside the job script. Scratch for temporaries and compiled kernels: ODDE_LOCAL, default a directory under TMPDIR (node-local)
+# per invocation. At 9,216 tokens on 8 GCDs a job needs the node's whole memory (sbatch --mem=0): the structural stage holds ~467 GiB.
+set -eu
+
+note() { printf '[opendde] %s\n' "$*" >&2; }
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` function are dropped. Slurm's variables, ROCR_VISIBLE_DEVICES and the port's ODDE_* / MODEL_OPT_* / ROWPAIR_*
+#    words pass through.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT HIP_PATH HSA_PATH ROCM_HOME \
+         HIP_PLATFORM BASH_ENV ENV LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_ VIRTUAL_ENV MODEL_OPT \
+         OPENDDE_OPT OPENDDE_ROOT_DIR; do
+  unset "$v" 2>/dev/null || true
+done
+W=/opt/opendde
+export ODDE_ROOT=$W ROCM_PATH=/opt/rocm PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+       PATH=$W/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+# 2. --weights DIR (pred, check) -> ODDE_WEIGHTS
+if [ "${1:-}" = "--weights" ]; then
+  [ $# -ge 2 ] || { note "--weights needs a directory"; exit 2; }
+  ODDE_WEIGHTS=$2; shift 2
+fi
+[ -n "${ODDE_WEIGHTS:-}" ] && export ODDE_WEIGHTS
+
+# 3. Writable scratch outside $HOME (1 GB quota on Setonix) and outside the read-only image: one directory per invocation unless
+#    ODDE_LOCAL is given. odde-env.sh puts the JIT, Triton, MIOpen and numba caches under it. The kit's weights-digest memo goes
+#    beside the weights when that directory is writable (it then serves every later job: 2.6 GB is hashed once), else under ODDE_LOCAL.
+T=${ODDE_LOCAL:-${TMPDIR:-/tmp}/odde-$(id -u)-${SLURM_JOB_ID:-x}-$$}
+mkdir -p "$T" 2>/dev/null || T=$(mktemp -d)
+export ODDE_LOCAL="$T"
+if [ -z "${MODEL_OPT_WEIGHTS_DIGEST_DIR:-}" ]; then
+  if [ -n "${ODDE_WEIGHTS:-}" ] && mkdir -p "$ODDE_WEIGHTS/.odde-digest" 2>/dev/null && [ -w "$ODDE_WEIGHTS/.odde-digest" ]; then
+    MODEL_OPT_WEIGHTS_DIGEST_DIR=$ODDE_WEIGHTS/.odde-digest
+  else
+    MODEL_OPT_WEIGHTS_DIGEST_DIR=$T/digest
+  fi
+fi
+export MODEL_OPT_WEIGHTS_DIGEST_DIR
+
+# 4. Every verb below sources the port's scripts/odde-env.sh first: the venv, the kit's paths, the per-rank hook, the size gates and
+#    HIP_LAUNCH_BLOCKING=1. It returns 97 if the tree is incomplete.
+case "$cmd" in
+  pred|predict)
+    [ -n "${ODDE_WEIGHTS:-}" ] || { note "no weights: give --weights DIR or ODDE_WEIGHTS=DIR (opendde fetch-weights DIR fetches them)"; exit 2; }
+    exec $CLEAN /bin/bash -c '. "$1/scripts/odde-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/odde-pred.sh" "${@:2}"' _ "$W" "$@" ;;
+  fetch-weights)
+    [ $# -eq 1 ] || { note "usage: opendde fetch-weights DIR"; exit 2; }
+    mkdir -p "$1"
+    exec $CLEAN /bin/bash -c '. "$1/scripts/odde-env.sh" > /dev/null || exit 97; exec python -m opendde_opt.weights "$2"' _ "$W" "$1" ;;
+  compare)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/odde-env.sh" > /dev/null || exit 97; exec python "$1/tools/compare_structures.py" "${@:2}"' _ "$W" "$@" ;;
+  kit)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/odde-env.sh" > /dev/null || exit 97; exec bash "$MODEL_OPT/run.sh" "${@:2}"' _ "$W" "$@" ;;
+  check)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/odde-env.sh" > /dev/null 2>&1 || exit 97
+                              exec python "$1/container/opendde_check.py" "${@:2}"' _ "$W" "$@" ;;
+  version)
+    cat $W/source.txt $W/kit.txt $W/rocm-packages.txt 2>/dev/null
+    grep -E '^(torch|triton-rocm|numpy|biotite|rdkit|opendde)( @ |==)' $W/environment/image-freeze.txt 2>/dev/null | sed 's/==/ /; s/ @ file:.*\// /'
+    exit 0 ;;
+  python)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/odde-env.sh" > /dev/null 2>&1; exec python "${@:2}"' _ "$W" "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (opendde help)"; exit 2 ;;
+esac
