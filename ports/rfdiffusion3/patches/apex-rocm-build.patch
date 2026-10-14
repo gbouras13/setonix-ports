@@ -1,0 +1,31 @@
+diff --git a/csrc/layer_norm_cuda_kernel.cu b/csrc/layer_norm_cuda_kernel.cu
+index df1ff68..ea1ccd4 100644
+--- a/csrc/layer_norm_cuda_kernel.cu
++++ b/csrc/layer_norm_cuda_kernel.cu
+@@ -1,4 +1,6 @@
+-#include <cuda.h>
++#ifndef __HIP_PLATFORM_AMD__
++#include <cuda.h>          // no hipify mapping and no HIP equivalent; nothing here uses the driver API
++#endif
+ #include <cuda_runtime.h>
+ 
+ #include <optional>
+@@ -267,15 +269,15 @@ __device__ void cuWelfordMuSigma2(const at::Half* __restrict__ vals, const int n
+ }
+ 
+ template <typename U>
+-U rsqrt(U v) {
++__device__ U rsqrt(U v) {
+   return U(1) / sqrt(v);
+ }
+ template <>
+-float rsqrt(float v) {
++__device__ float rsqrt(float v) {
+   return rsqrtf(v);
+ }
+ template <>
+-double rsqrt(double v) {
++__device__ double rsqrt(double v) {
+   return rsqrt(v);
+ }
+ 
