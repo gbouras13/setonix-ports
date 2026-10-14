@@ -10,11 +10,17 @@
 # - Kit modes (exact | fast | big) also get the gfx90a boot patch (scripts/boot on PYTHONPATH + CFS_GFX90A=1: opt_core's provider reads gfx90a
 #   as the A100 column 8.0; the reviewed alphafold-colabfold 2.3.20 pin entry for big --n_gpu) and the port's lever drops (MODEL_OPT_LEVERS_OFF,
 #   the kit's own ablation switch, from scripts/cfs-recipes.sh unless the caller set it). --mode off is the kit's stock route, untouched.
+# - fast, and big on one GCD (pred | warm): adds colabfold_batch's own --use-fast-kernels unless the caller passed --use-fast-kernels,
+#   --no-use-fast-kernels or the old --use-pallas (the user's default, 2026-10-10). ColabFold's Pallas LayerNorm / gated-projection /
+#   attention kernels add to the kit's levers: 1.30x per pass at 3,080 residues, 1.06x on the trimer, the 4,620-residue limit unchanged,
+#   structures inside stock's spread (COLABFOLD_PORT.md P11). Never for off (stock), exact (bitwise to stock) or --n_gpu > 1 (2-3% for
+#   0.8-3.3 GB more per GCD, P12).
 set -u
 W=${CFS_W:-$(cd "$(dirname "$0")/.." && pwd)}   # the tree: the directory above scripts/
-MODE=""; prev=""; INPUT=""; CMD=""; NGPU=1; HAVE_CM=0
+MODE=""; prev=""; INPUT=""; CMD=""; NGPU=1; HAVE_CM=0; HAVE_FK=0
 for a in "$@"; do
   case "$a" in --n_gpu=*) NGPU=${a#--n_gpu=} ;; --compile-mode|--compile-mode=*) HAVE_CM=1 ;; esac
+  case "$a" in --use-fast-kernels|--no-use-fast-kernels|--use-pallas|--use-pallas=*) HAVE_FK=1 ;; esac
   [ "$prev" = "--n_gpu" ] && NGPU=$a
   case "$a" in --mode=*) MODE=${a#--mode=} ;; esac
   [ "$prev" = "--mode" ] && MODE=$a
@@ -41,4 +47,13 @@ EXTRA=()
 if [ "$CMD" = pred ] && [ "${NGPU:-1}" -gt 1 ] 2>/dev/null && [ "$HAVE_CM" = 0 ]; then
   EXTRA=(--compile-mode full); echo "[cfs] --n_gpu $NGPU: adding colabfold_batch --compile-mode full (1.6.3's tuned compiler_options cannot sit under the sharded jit)" >&2
 fi
-exec bash "$MODEL_OPT/run.sh" --config mi250x "$@" ${EXTRA[@]+"${EXTRA[@]}"}
+# ColabFold 1.6.3 declares --use-fast-kernels with argparse's BooleanOptionalAction (the only such flag). The kit's option table
+# (colabfold_opt/settings.py options_table, read from the wheel's add_argument calls) counts only string actions as bare, so it takes this
+# flag for a valued one and reads the next token as its value: `--use-fast-kernels --compile-mode full` left `full` as a third positional
+# (usage error, rc 2: lever 2, job 50594899). The flag is bare to colabfold, so its place does not matter: it goes last, where nothing follows.
+ARGS=(); FK=()
+for a in "$@"; do case "$a" in --use-fast-kernels|--no-use-fast-kernels) FK+=("$a") ;; *) ARGS+=("$a") ;; esac; done
+if { [ "$CMD" = pred ] || [ "$CMD" = warm ]; } && { [ "$MODE" = fast ] || [ "$MODE" = big ]; } && [ "${NGPU:-1}" -le 1 ] 2>/dev/null && [ "$HAVE_FK" = 0 ]; then
+  FK+=(--use-fast-kernels); echo "[cfs] mode=$MODE on one GCD: adding colabfold_batch --use-fast-kernels (ColabFold's own kernels; --no-use-fast-kernels opts out)" >&2
+fi
+exec bash "$MODEL_OPT/run.sh" --config mi250x ${ARGS[@]+"${ARGS[@]}"} ${EXTRA[@]+"${EXTRA[@]}"} ${FK[@]+"${FK[@]}"}

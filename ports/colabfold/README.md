@@ -11,8 +11,8 @@ freeze) and scripts. The evidence is in `af3-setonix/COLABFOLD_PORT.md`.
 |---|---|---|---|
 | `off` | stock ColabFold 1.6.3 | 1x | 4,235 residues on one GCD |
 | `exact` | stock maths, with the parameters kept on the GPU; byte-identical to `off` under XLA's deterministic flags | ~1.03x | as `off` |
-| `fast` | the kit's Pallas kernels and larger sub-batches | ~1.5-2.0x | 4,620 residues on one GCD |
-| `big` | `fast` on one GCD; `--n_gpu 2/4/8` shares one complex across GCDs | each pass 3.4-4.0x faster on 8 GCDs | 11,165 residues on a node |
+| `fast` | the kit's Pallas kernels plus ColabFold's own `--use-fast-kernels` | 2.0-2.8x per pass | 4,620 residues on one GCD |
+| `big` | `fast` on one GCD; `--n_gpu 2/4/8` shares one complex across GCDs | on 8 GCDs, each pass 2.3-2.7x faster than one-GCD `fast` (6.3x stock at 3,850 residues) | 11,165 residues on a node |
 
 ## The image
 
@@ -33,6 +33,10 @@ freeze) and scripts. The evidence is in `af3-setonix/COLABFOLD_PORT.md`.
     and m8 files, in 1,099 s against the native 1,076 s (job 50604344).
   - The check and the predictions ran on the previous build (`sha256:39a89a04…`). It differs from this one in two files only:
     `cf-search.sh`, which got the search fix, and the commit line.
+- **Not in that image yet:** the runner changes of 2026-10-10 in `scripts/cfs-run.sh`.
+  - `--use-fast-kernels` is added by default for `fast` and one-GCD `big`.
+  - That flag is kept last, so that `--n_gpu` > 1 works with it.
+  - The native port validated both (`COLABFOLD_PORT.md` P11-P12). An image built with them needs `slurm/validate.sbatch` before a release.
 
 ```bash
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/colabfold:main /scratch/<project>/$USER/singularity
@@ -60,6 +64,8 @@ singularity exec $SIF colabfold predict --mode fast msas/ out/ --num-recycle 3  
   - Options go to `colabfold_search`, e.g. `--af3-json` or `--pair-mode paired`.
 - **`predict`** runs the port's runner, `scripts/cfs-run.sh`.
   - It sets the ROCm environment, and picks copy-only launch serialisation up to 2,310 residues and blocking above.
+  - For `fast` and one-GCD `big` it adds ColabFold's own `--use-fast-kernels` (1.3x per pass at 3,080 residues).
+    `--no-use-fast-kernels` opts out. It stays off for `off`, `exact` and `--n_gpu` runs.
   - ColabFold reports a failed prediction as "Could not predict" and exits 0. The kit reports it as `FAILED` and exits non-zero.
 - **Variables** (`CFS_SERIALISE`, `XLA_PYTHON_CLIENT_MEM_FRACTION=0.949` for 11,165-11,550 residues on 8 GCDs, `COLABFOLD_OPT_JIT_ROOT`)
   go inside the job script. Setonix starts every job from a fresh login environment (`SBATCH_EXPORT=NONE`).
