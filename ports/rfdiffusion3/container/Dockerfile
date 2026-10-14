@@ -77,12 +77,16 @@ RUN git clone --quiet --filter=blob:none --no-checkout "$KIT_REPO" /opt/rfdiffus
 # as every RMSNorm; absent, the KERNELS census reads `rmsnorm=fallback` and the pass is refused, exit 5). Only the one extension upstream
 # actually uses is built -- apex's own setup.py has no ROCm path at this commit and would build twelve, none of the other eleven imported
 # by rfd3. The wheel is built once and installed into both interpreters in step 5.
+# The throwaway build venv takes torch --no-deps, so torch's own import-time dependencies have to be named: `setup.py` imports
+# torch.utils.cpp_extension, which runs torch/__init__.py, which imports typing_extensions, filelock, sympy, networkx, jinja2 and
+# fsspec. They come from the lock, at the versions the native port validated, so this venv and step 5's two agree on every one.
 ARG APEX_REPO=https://github.com/NVIDIA/apex.git
 ARG APEX_COMMIT=a1d527a857e8da64c4e7237ca89ec699fb4d9eaf
 ARG PYTORCH_ROCM_ARCH=gfx90a
 ARG TORCH_INDEX_FOR_APEX=https://download.pytorch.org/whl/rocm7.2
 COPY patches/ /opt/rfdiffusion3/patches/
 COPY container/apex_fusedln_setup.py /opt/rfdiffusion3/container/
+COPY environment/requirements.lock /opt/rfdiffusion3/environment/
 RUN git clone --quiet "$APEX_REPO" /tmp/apex \
  && git -C /tmp/apex -c advice.detachedHead=false checkout --quiet "$APEX_COMMIT" \
  && test "$(git -C /tmp/apex rev-parse HEAD)" = "$APEX_COMMIT" \
@@ -95,6 +99,8 @@ RUN git clone --quiet "$APEX_REPO" /tmp/apex \
  && /tmp/apexbuild/bin/python -m pip install --quiet --no-compile --no-deps \
       --index-url "$TORCH_INDEX_FOR_APEX" --extra-index-url https://pypi.org/simple \
       torch==2.14.0+rocm7.2 \
+      $(grep -iE '^(typing_extensions|filelock|sympy|mpmath|networkx|jinja2|markupsafe|fsspec)==' \
+          /opt/rfdiffusion3/environment/requirements.lock) \
  && ( cd /tmp/apex && APEX_CPP_EXT=1 APEX_CUDA_EXT=1 \
         /tmp/apexbuild/bin/python /opt/rfdiffusion3/container/apex_fusedln_setup.py bdist_wheel -d /tmp/apexwheel ) \
  && ls -la /tmp/apexwheel \
@@ -114,7 +120,6 @@ ARG PRUNE_GPU_ARCH=gfx90a
 ARG TORCH_INDEX=https://download.pytorch.org/whl/rocm7.2
 ARG FOUNDRY_VERSION=0.2.1.dev13+g4010e3e2e
 COPY container/prune_rocm_arch.py container/build_venvs.sh /opt/rfdiffusion3/container/
-COPY environment/requirements.lock /opt/rfdiffusion3/environment/
 RUN W=/opt/rfdiffusion3 TORCH_INDEX="$TORCH_INDEX" FOUNDRY_VERSION="$FOUNDRY_VERSION" PRUNE_GPU_ARCH="$PRUNE_GPU_ARCH" \
     APEX_WHEEL_DIR=/tmp/apexwheel sh /opt/rfdiffusion3/container/build_venvs.sh \
  && rm -rf /tmp/apex /tmp/apexwheel
