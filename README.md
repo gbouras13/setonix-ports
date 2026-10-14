@@ -19,6 +19,9 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
    ```bash
    sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/af3jax:main /scratch/<project>/$USER/singularity
    ```
+   The job re-compresses the SIF with lz4, which starts several processes at once faster than Singularity's own gzip (`--gzip` keeps
+   that), and writes `<name>.provenance.txt` beside it: the image's digest, its source revision and the conversion. Singularity then
+   prints an INFO line about lz4 each time the SIF starts; it is harmless, and `singularity -q` hides it.
 2. Check it on a GPU node: `singularity exec $SIF af3jax check`. It lists the GPUs and checks that every GPU library was loaded from
    the image.
 3. Run it through the port's entry point, for example `singularity exec $SIF af3jax predict ...` (see the port's README).

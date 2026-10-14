@@ -55,10 +55,12 @@ The kit ships no `fast` tier for ProteinMPNN, so there is no accuracy trade-off 
   - At that size, 1,472 backbones x 8 designs (job 50668900), image and native are byte-identical too, on 8 GCDs x 2 and on one GCD.
 - **Start-up.** Designing runs at native speed, but a run starts later from the SIF, and more so with more workers. At 1,472
   backbones x 8 designs (job 50668900, both arms warm) the difference is 5.7 s on one GCD (143.9 against 138.2 s), 9.7 s on 8 GCDs x 1
-  (38.4 against 28.7) and 17.1 s on 8 x 2 (44.7 against 27.6). A SIF is a gzip squashfs that each `singularity exec` mounts afresh
-  and the kernel decompresses on one thread, so workers that start together queue for torch's libraries (job 50669530).
-  - From the SIF, `--per-gcd 1` is the faster whole node at that size (307 against 263 designs/s); natively `--per-gcd 2` leads. Even
-    263 is above stock's best node rate, 200.9.
+  (38.4 against 28.7) and 17.1 s on 8 x 2 (44.7 against 27.6). Singularity writes a SIF as a gzip squashfs, which each `singularity exec`
+  mounts afresh and the kernel decompresses on one thread, so workers that start together queue for torch's libraries (job 50669530).
+  - `slurm/pull_image.sbatch` re-compresses the SIF with lz4, which decompresses several times faster: on 8 x 2 at 1,472 backbones
+    that SIF started 6.2 s behind native instead of 17.0 s, with byte-identical designs (job 50681452).
+  - From the gzip SIF, `--per-gcd 1` was the faster whole node at that size (307 against 263 designs/s); natively `--per-gcd 2` leads.
+    Even 263 is above stock's best node rate, 200.9.
   - For many short runs in one job, run them in one `singularity exec` (a second `dp` there started 12 s sooner), or unpack the image
     to the node's NVMe once and run from that: book it with `--gres=gpu:8,tmp:100G`, then `singularity build --sandbox /tmp/pms-sandbox $SIF`
     (about 13 s) and use `/tmp/pms-sandbox` in place of `$SIF`. Start-up then matches native (9.6 against 8.9 s for 16 backbones on 8 x 2).
