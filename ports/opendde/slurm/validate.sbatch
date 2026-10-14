@@ -1,13 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=opendde-validate
-#SBATCH --partition=gpu-highmem
+#SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --exclusive
 #SBATCH --time=01:45:00
 #SBATCH --output=opendde-validate.%j.out
 
-# The opendde image against the native port, on one Setonix GPU node (8 MI250X GCDs).
+# The opendde image against the native port, on one Setonix GPU node (8 MI250X GCDs). A `gpu` node is enough: the largest run here
+# (4,096 tokens on 8 GCDs) holds ~91 GiB of host RAM. Predictions near 9,216 tokens need a gpu-highmem node with --mem=0.
 #   sbatch --account=<project>-gpu validate.sbatch SIF=<the .sif> OUT=<dir> [NATIVE_D=<the native opendde-setonix tree>]
 #          [WEIGHTS=<a complete weights root; default: fetched by part 1>] [REF600=<native 600-token P=2 output>]
 #          [REF4096=<native 4,096-token P=8 output>] [PARTS=fetch,check,p2,p8]
