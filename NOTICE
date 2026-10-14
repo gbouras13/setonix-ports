@@ -53,6 +53,16 @@ The protenix image (ports/protenix/container/Dockerfile) contains, besides ROCm 
   - CPython 3.12.12 (PSF License), from python-build-standalone.
   The Protenix v2 checkpoint and its data caches are not included: `protenix fetch-weights` downloads them at run time.
 
+The opendde image (ports/opendde/container/Dockerfile) contains, besides the ROCm components above:
+  - OpenDDE 1.1.1 (aurekaresearch/OpenDDE, Copyright (c) 2026 Aureka AI Research): Apache License 2.0, installed from the kit's
+    pinned wheel.
+  - The OpenDDE optimisation kit, anthropics/uplifting-biomolecular-modeling (Copyright 2026 Anthropic, PBC): Apache License 2.0, with
+    its own NOTICE and THIRD_PARTY_NOTICES.md, at /opt/opendde/kit.
+  - PyTorch 2.14.0 for ROCm 7.2 (BSD-style licence) with the ROCm 7.2 runtime it carries, triton-rocm 3.8.0 (MIT), RDKit (BSD
+    3-Clause), and the other Python packages of ports/opendde/environment/requirements.lock, each under its own licence.
+  - CPython 3.12.12 (PSF License), from python-build-standalone.
+  The OpenDDE checkpoint and its data files are not included: `opendde fetch-weights` downloads them from their upstream sources.
+
 MODEL PARAMETERS ARE NOT INCLUDED
 
 No image and no file in this repository contains model weights or parameters. The AlphaFold 3 model parameters are available from

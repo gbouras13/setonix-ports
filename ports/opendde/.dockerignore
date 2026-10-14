@@ -1,0 +1,13 @@
+# Build context = ports/opendde (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/opendde
+!container/opendde_check.py
+!container/prune_rocm_arch.py
+!environment
+!scripts
+!patches
+!tools
+!tests
+**/__pycache__
+**/*.pyc
+**/.DS_Store
