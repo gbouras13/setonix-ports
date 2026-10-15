@@ -13,6 +13,7 @@
 # unpinned install, then setup-venv.sh's pinned --ignore-installed one over it), the pinned version is the one installed last, and the
 # one opendde 1.1.1 itself pins. Not honoured, as natively: opendde's own pins torch==2.7.1 (the ROCm build stays), numpy==2.4.1 and
 # rdkit==2025.9.3 (the native process runs numpy 2.5.3 and rdkit 2025.9.6, which it inherits).
+# cloudpickle is joblib 1.6.0's requirement (the first build's pip check named it).
 # torch and triton-rocm come from download.pytorch.org/whl/rocm7.2.
 absl-py==2.5.0
 annotated-types==0.8.0
@@ -22,6 +23,7 @@ biotraj==1.2.2
 certifi==2026.7.22
 charset-normalizer==3.5.1
 click==8.5.0
+cloudpickle==3.1.2
 filelock==3.32.3
 fsspec==2026.7.0
 idna==3.20

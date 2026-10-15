@@ -82,7 +82,7 @@ singularity exec $SIF opendde compare a.cif b.cif                               
 |---|---|
 | `container/Dockerfile` | the image: python-build-standalone 3.12.12, the lock, the kit at `f4f62fa6`, the port; torch's ROCm kernels pruned to gfx90a |
 | `container/opendde`, `container/opendde_check.py` | the entry point and its self-check |
-| `environment/requirements.lock` | the 42 packages the native port runs on, at its versions (its venv is layered on another env: this is the closure) |
+| `environment/requirements.lock` | the 43 packages the native port runs on, at its versions (its venv is layered on another env: this is the closure) |
 | `scripts/` | the native port's environment, its two prediction scripts as one (`odde-pred.sh`), and the per-rank cache hook |
 | `patches/` | the eight opt-in fixes and the hook chain that installs them, verbatim from the native port |
 | `tests/` | the fixes' CPU tests, the 600- and 4,096-token queries, and the native 600-token `--det 1` reference structure |
