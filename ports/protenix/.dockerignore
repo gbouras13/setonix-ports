@@ -1,0 +1,13 @@
+# Build context = ports/protenix (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/protenix
+!container/protenix_check.py
+!container/prune_rocm_arch.py
+!environment
+!hooks
+!scripts
+!tools
+!tests
+**/__pycache__
+**/*.pyc
+**/.DS_Store

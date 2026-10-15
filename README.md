@@ -11,7 +11,8 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 | [`mmseqs2-hip`](ports/mmseqs2-hip/) | MMseqs2's GPU (HIP) build, for `colabfold_search` and any GPU search | image `ghcr.io/gbouras13/setonix-ports/mmseqs2-hip`, GPU test |
 | [`colabfold`](ports/colabfold/) | ColabFold 1.6.3 with the kit's modes, plus `colabfold_search` on the GPU binary | image `ghcr.io/gbouras13/setonix-ports/colabfold`, validation job |
 | [`proteinmpnn`](ports/proteinmpnn/) | ProteinMPNN inverse folding, byte-identical to stock and 11.6x faster per GCD | runner, boot patch, data-parallel driver, image `ghcr.io/gbouras13/setonix-ports/proteinmpnn`, validation job |
-| `openfold3`, `protenix`, `boltz2`, `opendde` | | not yet: ported and validated on Setonix, to follow here |
+| [`protenix`](ports/protenix/) | Protenix v2 with the kit's `big` line: one GCD byte-identical to stock, or row-sharded over a node | launcher, checks, image `ghcr.io/gbouras13/setonix-ports/protenix`, validation job |
+| `openfold3`, `boltz2`, `opendde` | | not yet: ported and validated on Setonix, to follow here |
 
 ## Using an image on Setonix
 

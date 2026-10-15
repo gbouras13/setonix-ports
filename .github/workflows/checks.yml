@@ -55,3 +55,6 @@ jobs:
 
       - name: af3jax wrapper decisions
         run: bash ports/af3jax/tests/test_wrapper.sh
+
+      - name: protenix launcher decisions
+        run: bash ports/protenix/tests/test_launcher.sh
