@@ -24,9 +24,9 @@
 # the pulled one, and keeps the gzip SIF if any step fails. About 2 minutes and 1.2 GB more SIF (job 50707295: 118 s, 5.2 -> 6.4 GB).
 # Singularity prints an INFO line about lz4 whenever such a SIF starts; it is harmless, and `singularity -q` hides it.
 # Beside the SIF, <name>.provenance.txt records what it is: the image and its digest, the source revision, and the conversion.
-# Then: the image's own self-check without a GPU (af3jax / colabfold / proteinmpnn / protenix check --no-gpu; mmseqs version). The GPU
-# check runs in a GPU job (af3jax check, colabfold check, proteinmpnn check, protenix check; mmseqs2-hip: ports/mmseqs2-hip/slurm/
-# test_gpu.sbatch).
+# Then: the image's own self-check without a GPU (af3jax / colabfold / proteinmpnn / boltz2 / protenix check --no-gpu; mmseqs version).
+# The GPU check runs in a GPU job (af3jax check, colabfold check, proteinmpnn check, boltz2 check, protenix check; mmseqs2-hip:
+# ports/mmseqs2-hip/slurm/test_gpu.sbatch).
 set -euo pipefail
 GZIP=0; ARGS=()
 for a in "$@"; do case "$a" in --gzip) GZIP=1 ;; *) ARGS+=("$a") ;; esac; done
@@ -153,6 +153,6 @@ singularity inspect --labels "$SIF" | grep -E "org.opencontainers.image.(title|s
 singularity exec "$SIF" sh -c 'cat /opt/*/source.txt /opt/*/kit.txt /opt/*/wheel.txt /opt/*/build.txt 2>/dev/null' || true
 
 echo; echo "=== self-check without a GPU ==="
-singularity exec "$SIF" sh -c 'for c in af3jax colabfold proteinmpnn protenix; do command -v "$c" > /dev/null && exec "$c" check --no-gpu; done
+singularity exec "$SIF" sh -c 'for c in af3jax colabfold proteinmpnn boltz2 protenix; do command -v "$c" > /dev/null && exec "$c" check --no-gpu; done
                                 command -v mmseqs > /dev/null && exec mmseqs version; echo "no known entry point"; exit 1'
 echo; echo "SIF ready: $SIF   (run it without --rocm)"

@@ -1,0 +1,12 @@
+# Build context = ports/boltz2 (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/boltz2
+!container/boltz2_check.py
+!container/prune_rocm_arch.py
+!environment
+!scripts
+!tools
+!tests
+**/__pycache__
+**/*.pyc
+**/.DS_Store

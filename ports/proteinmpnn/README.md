@@ -59,8 +59,9 @@ The kit ships no `fast` tier for ProteinMPNN, so there is no accuracy trade-off 
   mounts afresh and the kernel decompresses on one thread, so workers that start together queue for torch's libraries (job 50669530).
   - `slurm/pull_image.sbatch` re-compresses the SIF with lz4, which decompresses several times faster: on 8 x 2 at 1,472 backbones
     that SIF started 6.2 s behind native instead of 17.0 s, with byte-identical designs (job 50681452).
-  - From the gzip SIF, `--per-gcd 1` was the faster whole node at that size (307 against 263 designs/s); natively `--per-gcd 2` leads.
-    Even 263 is above stock's best node rate, 200.9.
+  - From the gzip SIF, `--per-gcd 1` was the faster whole node at that size (307 against 263 designs/s), because start-up grows with
+    the number of workers; natively `--per-gcd 2` leads. From the lz4 SIF that margin should shrink to a second or two, inside the
+    run-to-run spread (not measured). Even 263 is above stock's best node rate, 200.9.
   - For many short runs in one job, run them in one `singularity exec` (a second `dp` there started 12 s sooner), or unpack the image
     to the node's NVMe once and run from that: book it with `--gres=gpu:8,tmp:100G`, then `singularity build --sandbox /tmp/pms-sandbox $SIF`
     (about 13 s) and use `/tmp/pms-sandbox` in place of `$SIF`. Start-up then matches native (9.6 against 8.9 s for 16 backbones on 8 x 2).
@@ -88,7 +89,7 @@ export PMS_LOCAL=/tmp/pms-$USER-$SLURM_JOB_ID && mkdir -p $PMS_LOCAL
 C="singularity exec --bind $PMS_LOCAL:$PMS_LOCAL $SIF proteinmpnn"       # never --rocm
 
 $C design --mode exact --input backbones/ --out designs/ --num_seq_per_target 8 --sampling_temp 0.1 --seed 37   # one GCD
-$C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --per-gcd 1 --num_seq_per_target 8  # the node (Start-up)
+$C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --per-gcd 2 --num_seq_per_target 8  # the node
 ```
 
 - **`design`** is the kit's own `run.sh design` with the boot patch injected. Every stock option works and means what it means upstream
@@ -101,7 +102,7 @@ $C dp --mode exact --input backbones/ --out designs/ --gcds 0,1,2,3,4,5,6,7 --pe
 - **`dp`** spreads one pass over the GCDs (`scripts/pms_dp.py`). In `exact` it stays byte-identical to **one** stock process however many
   workers it uses: each worker computes every backbone's offset in the single-process RNG stream and designs only its own share of the
   kit's length-sorted batch plan. Natively `--per-gcd 2` was the fastest arrangement measured (402 designs/s against 339 at one worker
-  per GCD); from the SIF it is `--per-gcd 1` (Start-up, above).
+  per GCD); from a gzip SIF `--per-gcd 1` was faster at 1,472 backbones, and from the lz4 SIF the two are close (Start-up, above).
   In `off` each shard restarts the seed, so its designs are valid samples but not a single stock run's bytes.
 - **Scratch.** `PMS_LOCAL` holds temporaries and the one compiled Triton kernel; bind it into the container as above, or the kernel is
   recompiled per job (about 2 s, job 50669530). `MODEL_OPT_JIT_ROOT` on `/scratch` keeps it between jobs.
