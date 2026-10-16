@@ -1,0 +1,59 @@
+# Setonix port stack: the packages the native Protenix v2 port imports, at the versions it validated. The native venv
+# (/scratch/pawsey1018/gbouras/protenix-setonix/venv) is LAYERED on the OpenFold3 conda env (--system-site-packages): its own pins
+# (scripts/setup-venv.sh: biotite 1.4.0, pandas 2.3.1, scikit-learn 1.7.1, biopython 1.85, optree 0.17.0, fair-esm 2.0.0 and their
+# support packages) plus torch, triton-rocm and the packages it inherits from that base. This list is the closure of those roots'
+# declared requirements (protenix 2.0.0's, the kit's two packages', torch's) over that effective environment, read from its installed
+# metadata on 2026-10-14, each at the version the native process resolves, plus lmdb (imported by protenix.utils.file_io, declared by
+# nothing). Left out on purpose, as natively: protenix itself (installed from the kit's own wheel, kit/protenix_v2/stock/), the kit's
+# two packages (editable), every CUDA / cuEquivariance package (none on ROCm), and what protenix declares but never imports at
+# inference (deepspeed, torchvision, torchaudio, matplotlib, ipywidgets, py3Dmol, modelcif, scikit-learn-extra, icecream, ipdb; wandb
+# is imported by runner/train.py only -- the native tree inherits a wandb 0.30.0 it never loads).
+# torch and triton-rocm come from download.pytorch.org/whl/rocm7.2.
+absl-py==2.5.0
+annotated-types==0.8.0
+biopython==1.85
+biotite==1.4.0
+biotraj==1.2.2
+certifi==2026.7.22
+charset-normalizer==3.5.1
+click==8.5.0
+cloudpickle==3.1.2
+fair-esm==2.0.0
+filelock==3.32.3
+fsspec==2026.7.0
+gemmi==0.7.5
+idna==3.20
+jinja2==3.1.6
+joblib==1.6.0
+lmdb==2.3.0
+markupsafe==3.0.3
+ml-collections==1.1.0
+mpmath==1.3.0
+msgpack==1.2.2
+networkx==3.6.1
+numpy==2.5.3
+optree==0.17.0
+packaging==26.3
+pandas==2.3.1
+pdbeccdutils==1.0.4
+pillow==12.3.0
+protobuf==7.36.2
+pydantic==2.13.5
+pydantic-core==2.46.5
+python-dateutil==2.9.0.post0
+pytz==2026.3.post1
+pyyaml==6.0.3
+rdkit==2025.9.6
+requests==2.34.2
+scikit-learn==1.7.1
+scipy==1.18.1
+six==1.17.0
+sympy==1.14.0
+threadpoolctl==3.7.0
+torch==2.14.0+rocm7.2
+tqdm==4.70.1
+triton-rocm==3.8.0
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+tzdata==2026.4
+urllib3==2.8.0

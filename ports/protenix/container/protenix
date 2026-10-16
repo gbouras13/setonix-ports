@@ -1,0 +1,131 @@
+#!/bin/sh
+# protenix -- entry point of the Protenix v2 Setonix image (ports/protenix). It keeps the host's software environment out and runs the
+# port's own scripts on the image's tree, /opt/protenix: the same tree a native install has (venv/, kit/, scripts/, tools/), without
+# weights. POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV, which bash would source. Run WITHOUT --rocm.
+#
+#   protenix fetch-weights DIR     the seven files a prediction reads (2.5 GB) into DIR, each checked against the kit's pinned sha256,
+#                                  as the native port fetched them: the protenix-v2 checkpoint from a Hugging Face mirror (upstream's
+#                                  own URL answers HTTP 403; tools/fetch_checkpoint.sh), then the six data caches through the kit's own
+#                                  routine, from upstream's server. Once; files already there are kept and checked
+#   protenix pred [--weights DIR] [--n_gpu P] -i Q.json -o OUT [stock options]
+#                                  one prediction through the kit's big line with the gfx90a recipe (scripts/ptx-pred.sh): on one GCD,
+#                                  or row-sharded over P GCDs of the node (P up to 8). --mode off runs stock Protenix in the kit's clean
+#                                  subprocess instead
+#   protenix stock [--weights DIR] -i Q.json -o OUT [stock options]
+#                                  stock Protenix 2.0.0's own CLI, with nothing of the kit applied
+#   protenix compare REF OUT ...   per sample: byte identity, CA RMSD and confidence deltas between output directories
+#   protenix check [--no-gpu] [--weights DIR] [--predict]
+#                                  versions, pins, GPUs, where every GPU library was loaded from; with weights, their digests; with
+#                                  --predict, the kit's 1BRS example (199 tokens) through stock and the one-GCD line under deterministic
+#                                  algorithms, compared byte for byte
+#   protenix kit ...               the kit's own CLI (python -m protenix_opt ...) in the port's environment, without the recipe
+#   protenix version | python ... | shell ... | help
+#
+# Weights: --weights DIR or PROTENIX_ROOT_DIR=DIR. Setonix starts every job from a fresh login environment (SBATCH_EXPORT=NONE), so set
+# what you need inside the job script. Scratch for temporaries and compiled kernels: PXS_LOCAL, default a directory under TMPDIR
+# (node-local) per invocation. Stock options pass through, e.g. --seeds 101 --use_msa false --cycle 10 --step 200 --sample 5.
+set -eu
+
+note() { printf '[protenix] %s\n' "$*" >&2; }
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` function are dropped. LD_LIBRARY_PATH too: a host ROCm module's library directory lies under /software, which
+#    Singularity binds, and the loader would search it before torch's own RUNPATH. Slurm's variables, ROCR_VISIBLE_DEVICES and the
+#    port's PXS_* / ROWPAIR_* / MODEL_OPT_* words pass through. The kit strips its own switch families (PTX_*, FPF_*, INFOPT_*, PF_*,
+#    PROTENIX_OPT*) from its stock route itself.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH HIP_PATH HSA_PATH \
+         ROCM_HOME HIP_PLATFORM BASH_ENV ENV LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_ VIRTUAL_ENV \
+         MODEL_OPT; do
+  unset "$v" 2>/dev/null || true
+done
+W=/opt/protenix
+# ptx-env.sh checks its base interpreter's stdlib landmark (natively the OpenFold3 env on /scratch, which the purge can take); here that
+# interpreter is the image's own.
+export PXS_ROOT=$W PXS_BASE_LANDMARK=/opt/python/lib/python3.12/os.py ROCM_PATH=/opt/rocm PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 \
+       PYTHONDONTWRITEBYTECODE=1 PATH=$W/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+# 2. --weights DIR (pred, stock, check, kit), anywhere on the line -> PROTENIX_ROOT_DIR, the one variable every route reads them by.
+case "$cmd" in
+  pred|predict|stock|check|kit)
+    n=$#; i=0
+    while [ "$i" -lt "$n" ]; do
+      a=$1; shift; i=$((i + 1))
+      case "$a" in
+        --weights)
+          [ "$i" -lt "$n" ] || { note "--weights needs a directory"; exit 2; }
+          PROTENIX_ROOT_DIR=$1; shift; i=$((i + 1)); continue ;;
+        --weights=*) PROTENIX_ROOT_DIR=${a#--weights=}; continue ;;
+      esac
+      set -- "$@" "$a"
+    done ;;
+  fetch-weights)
+    [ $# -eq 1 ] || { note "usage: protenix fetch-weights DIR"; exit 2; }
+    mkdir -p "$1" || exit 2
+    PROTENIX_ROOT_DIR=$1 ;;
+esac
+case "$cmd" in
+  pred|predict|stock)
+    [ -n "${PROTENIX_ROOT_DIR:-}" ] || { note "no weights: give --weights DIR or PROTENIX_ROOT_DIR=DIR (protenix fetch-weights DIR fetches them)"; exit 2; } ;;
+esac
+if [ -n "${PROTENIX_ROOT_DIR:-}" ]; then
+  [ -d "$PROTENIX_ROOT_DIR" ] || { note "weights directory '$PROTENIX_ROOT_DIR' does not exist (protenix fetch-weights DIR fetches them)"; exit 2; }
+  PROTENIX_ROOT_DIR=$(cd "$PROTENIX_ROOT_DIR" && pwd)
+  export PROTENIX_ROOT_DIR
+fi
+
+# 3. Writable scratch outside $HOME (1 GB quota on Setonix) and outside the read-only image: one directory per invocation unless
+#    PXS_LOCAL is given, so concurrent predictions in one job never share a cache. ptx-env.sh puts TMPDIR and the JIT, Triton, MIOpen,
+#    Inductor and numba caches under it. The kit's cache root, which holds its weights-digest memo, goes beside the weights when that
+#    directory is writable (2.5 GB are then hashed once, for every later job), else under PXS_LOCAL.
+T=${PXS_LOCAL:-${TMPDIR:-/tmp}/pxs-$(id -u)-${SLURM_JOB_ID:-x}-$$}
+mkdir -p "$T" 2>/dev/null || T=$(mktemp -d)
+export PXS_LOCAL="$T"
+if [ -z "${PROTENIX_OPT_CACHE_DIR:-}" ]; then
+  if [ -n "${PROTENIX_ROOT_DIR:-}" ] && mkdir -p "$PROTENIX_ROOT_DIR/.pxs-cache" 2>/dev/null && [ -w "$PROTENIX_ROOT_DIR/.pxs-cache" ]; then
+    PROTENIX_OPT_CACHE_DIR=$PROTENIX_ROOT_DIR/.pxs-cache
+  else
+    PROTENIX_OPT_CACHE_DIR=$T/kit-cache
+  fi
+fi
+export PROTENIX_OPT_CACHE_DIR
+
+# 4. Every verb below sources the port's own scripts/ptx-env.sh first (verbatim from the native tree): the venv, the kit's paths,
+#    PROTENIX_OPT_FORCE=1, LAYERNORM_TYPE=torch, the levers that cannot run here, HIP_LAUNCH_BLOCKING=1 and the sharded line's words.
+#    It returns 97 if the tree is incomplete.
+case "$cmd" in
+  pred|predict)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ptx-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/ptx-pred.sh" "${@:2}"' _ "$W" "$@" ;;
+  stock)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ptx-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/ptx-pred.sh" --mode stock "${@:2}"' _ "$W" "$@" ;;
+  fetch-weights)
+    # 1. the checkpoint: to <file>.part, size and sha256 against the pin, only then renamed into place (skipped if present);
+    # 2. the kit's own install step (python -m protenix_opt.weights DIR = run.sh install --weights DIR): upstream's downloader for the six
+    #    caches, then every file of the seven checked against stock/PINS.json ("WEIGHTS OK: 7/7").
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ptx-env.sh" > /dev/null || exit 97
+                              bash "$1/tools/fetch_checkpoint.sh" "$PROTENIX_ROOT_DIR" || exit 1
+                              exec python -m protenix_opt.weights "$PROTENIX_ROOT_DIR"' _ "$W" ;;
+  compare)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ptx-env.sh" > /dev/null || exit 97; exec python "$1/tools/ptx_outputs.py" compare "${@:2}"' _ "$W" "$@" ;;
+  kit)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ptx-env.sh" > /dev/null || exit 97; exec python -m protenix_opt "${@:2}"' _ "$W" "$@" ;;
+  check)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ptx-env.sh" > /dev/null 2>&1 || exit 97
+                              exec python "$1/container/protenix_check.py" "${@:2}"' _ "$W" "$@" ;;
+  version)
+    cat $W/source.txt $W/kit.txt $W/rocm-packages.txt 2>/dev/null
+    grep -E '^(torch|triton-rocm|numpy)==|^protenix @ |\((opt[-_]core|protenix[-_]opt)==' $W/environment/image-freeze.txt 2>/dev/null \
+      | sed 's/^# Editable install with no version control (\(.*\))$/\1 (editable, the kit)/; s/==/ /; s/ @ file:.*\// /'
+    exit 0 ;;
+  python)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ptx-env.sh" > /dev/null 2>&1; exec python "${@:2}"' _ "$W" "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (protenix help)"; exit 2 ;;
+esac

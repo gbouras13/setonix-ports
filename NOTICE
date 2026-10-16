@@ -43,6 +43,16 @@ The boltz2 image (ports/boltz2/container/Dockerfile) contains, besides the ROCm 
   - CPython 3.12.12 (PSF License), from python-build-standalone.
   The Boltz-2 weights are not included (MIT, boltz-community on Hugging Face): `boltz2 fetch-weights` downloads them at the user's request.
 
+The protenix image (ports/protenix/container/Dockerfile) contains, besides ROCm components like those above:
+  - Protenix 2.0.0 (bytedance/Protenix, tag v2.0.0, commit 2475421477ab414b571149ad4a875c390ff8a35d; Copyright 2024 ByteDance and/or its
+    affiliates), installed from the optimisation kit's own wheel of that release: Apache License 2.0.
+  - The Protenix v2 optimisation kit, anthropics/uplifting-biomolecular-modeling (Copyright 2026 Anthropic, PBC): Apache License 2.0, with
+    its own NOTICE and third-party notices (protenix_v2/THIRD_PARTY_NOTICES.md), at /opt/protenix/kit.
+  - PyTorch 2.14.0+rocm7.2 (BSD 3-Clause, with the ROCm 7.2 libraries its wheel bundles) and triton-rocm 3.8.0 (MIT), and the other Python
+    packages of ports/protenix/environment/requirements.lock, each under its own licence.
+  - CPython 3.12.12 (PSF License), from python-build-standalone.
+  The Protenix v2 checkpoint and its data caches are not included: `protenix fetch-weights` downloads them at run time.
+
 MODEL PARAMETERS ARE NOT INCLUDED
 
 No image and no file in this repository contains model weights or parameters. The AlphaFold 3 model parameters are available from
