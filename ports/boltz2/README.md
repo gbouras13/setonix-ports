@@ -3,7 +3,14 @@
 Boltz-2 (`boltz` 2.2.1) on Setonix's MI250X GCDs, through the optimisation kit's four modes, with the recipes that make each one run on
 gfx90a. The evidence is in `af3-setonix/BOLTZ2_PORT.md`.
 
-**Status: not yet validated on Setonix** (`slurm/validate.sbatch` compares this image with the native port, byte for byte).
+- **Validated on Setonix** (2026-10-15), image `sha-c360902`, digest `sha256:18274f03…` (job 50947435, every section passes):
+  - `boltz2 check --predict` on all 8 GCDs: the tree, the kit's pin check, the weights through the kit's own weights verb, every GPU
+    library loaded from inside the image, and the kit's 398-token example through stock and `exact` inside the image, byte-identical.
+  - The HK97 trimer through every mode in the image (stock, `exact`, `fast`, `fast` with the row patch, the one-GCD `big` default and
+    `big --n_gpu 2`): byte-identical to the native port (job 50669039), at native speed (fast + patch 99.6 s against 102.1, big 109.1
+    against 110.9, stock 281.4 against 278.1).
+  - `boltz2 fetch-weights`: the four files from Hugging Face (6.55 GB in about 9 minutes), each at the kit's pinned sha256 and
+    identical to the native copies.
 
 On the HK97 capsid trimer with its ColabFold MSA (1,155 tokens, seed 1, upstream settings: 3 recycles, 200 steps), against stock in the
 same job:
