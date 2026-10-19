@@ -133,8 +133,15 @@ RUN L=$(/opt/protenix/venv/bin/python -c "import sysconfig; print(sysconfig.get_
  && protenix help > /dev/null \
  && protenix version
 
-ENV PATH=/opt/protenix/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+# /usr/local/bin first. Stock Protenix's wheel installs its own CLI as venv/bin/protenix, which would otherwise shadow this entry point
+# for `singularity exec <sif> protenix ...`: the first image's pull job ran stock's CLI in its self-check, which took stock's CUDA
+# LayerNorm JIT and died for want of ninja (job 51048476). The step above ran before this PATH existed, so it could not see that. The
+# entry point puts the venv first again inside, where the kit expects stock's CLI. The check below runs on the final PATH.
+ENV PATH=/usr/local/bin:/opt/protenix/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PXS_ROOT=/opt/protenix
+RUN test "$(command -v protenix)" = /usr/local/bin/protenix \
+ && test "$(command -v python)" = /opt/protenix/venv/bin/python \
+ && protenix version > /dev/null
 LABEL org.opencontainers.image.title="protenix-setonix" \
       org.opencontainers.image.description="Protenix v2 (2.0.0) with the optimisation kit's big line, on one GCD (stock's arithmetic bit for bit) and row-sharded over up to 8, on AMD MI250X (gfx90a), ROCm 7.2.4, torch 2.14.0. No weights: protenix fetch-weights." \
       org.opencontainers.image.source="${SOURCE_URL}" \
