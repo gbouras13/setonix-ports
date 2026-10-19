@@ -120,13 +120,21 @@ COPY container/opendde container/opendde_check.py /opt/opendde/container/
 RUN chmod 0755 /opt/opendde/scripts/*.sh \
  && install -m 0755 /opt/opendde/container/opendde /usr/local/bin/opendde \
  && echo "source $SOURCE_URL @ $SOURCE_REV" > /opt/opendde/source.txt \
- && chmod -R a+rX /opt/opendde /opt/python \
+ && chmod -R a+rX /opt/opendde /opt/python
+
+# /usr/local/bin FIRST: the venv carries upstream's own `opendde` console script (a Click CLI), and with the venv first it answered
+# `singularity exec <sif> opendde ...` in place of the port's entry ("No such command 'check'" in the pull job's self-check of
+# sha256:89f72c58, 2026-10-17). The entry still puts the venv first for everything it runs.
+ENV PATH=/usr/local/bin:/opt/opendde/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 ODDE_ROOT=/opt/opendde
+# The self-check under the image's own PATH, as `singularity exec <sif> opendde check` runs it.
+RUN if [ "$(command -v opendde)" != /usr/local/bin/opendde ] || [ "$(command -v python)" != /opt/opendde/venv/bin/python ]; then \
+      echo "PATH: 'opendde' is $(command -v opendde) and 'python' is $(command -v python): want the port's entry and the venv's" >&2; \
+      exit 1; \
+    fi \
  && opendde check --no-gpu --patch-tests \
  && opendde help > /dev/null \
  && opendde version
-
-ENV PATH=/opt/opendde/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 ODDE_ROOT=/opt/opendde
 LABEL org.opencontainers.image.title="opendde-setonix" \
       org.opencontainers.image.description="OpenDDE 1.1.1 on the optimisation kit's big line (one GCD or row-sharded over up to 8) with the port's eight opt-in fixes, on AMD MI250X (gfx90a), ROCm 7.2.4, torch 2.14.0. No weights: opendde fetch-weights." \
       org.opencontainers.image.source="${SOURCE_URL}" \
