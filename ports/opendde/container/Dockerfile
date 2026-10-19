@@ -128,8 +128,9 @@ RUN chmod 0755 /opt/opendde/scripts/*.sh \
 ENV PATH=/usr/local/bin:/opt/opendde/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 ODDE_ROOT=/opt/opendde
 # The self-check under the image's own PATH, as `singularity exec <sif> opendde check` runs it.
-RUN if [ "$(command -v opendde)" != /usr/local/bin/opendde ]; then \
-      echo "PATH: 'opendde' is $(command -v opendde), not the port's entry" >&2; exit 1; \
+RUN if [ "$(command -v opendde)" != /usr/local/bin/opendde ] || [ "$(command -v python)" != /opt/opendde/venv/bin/python ]; then \
+      echo "PATH: 'opendde' is $(command -v opendde) and 'python' is $(command -v python): want the port's entry and the venv's" >&2; \
+      exit 1; \
     fi \
  && opendde check --no-gpu --patch-tests \
  && opendde help > /dev/null \
