@@ -1,0 +1,23 @@
+[
+ {
+  "id": "1BRS_barstar1_barnase1",
+  "sequences": [
+   {
+    "type": "protein",
+    "id": "A",
+    "sequence": "KKAVINGEQIRSISDLHQTLKKELALPEYYGENLDALWDALTGWVEYPLVLEWRQFEQSKQLTENGAESVLQVFREAKAEGADITIILS",
+    "msa": null
+   },
+   {
+    "type": "protein",
+    "id": "B",
+    "sequence": "AQVINTFDGVADYLQTYHKLPDNYITKSEAQALGWVASKGNLADVAPGKSIGGDIFSNREGKLPGKSGRTWREADINYTSGFRNSDRILYSSDWLIYKTTDHYQTFTKIR",
+    "msa": null
+   }
+  ],
+  "seeds": [
+   0
+  ],
+  "num_diffusion_samples": 1
+ }
+]
