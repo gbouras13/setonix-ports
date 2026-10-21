@@ -1,0 +1,111 @@
+#!/bin/sh
+# esmfold2 -- entry point of the ESMFold2 Setonix image (ports/esmfold2). It keeps the host's software environment out and runs the
+# port's own scripts on the image's tree, /opt/esmfold2: the native tree's layout (venv/, kit/, scripts/, tools/), without weights.
+# POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV, which bash would source. Run WITHOUT --rocm.
+#
+#   esmfold2 fetch-weights DIR     the three pinned snapshots (ESMC-6B, ESMFold2, ESMFold2-Fast: 16 files, 27.5 GB, Hugging Face
+#                                  biohub) into DIR, in Hugging Face's cache layout (DIR/hub/models--biohub--*/snapshots/<commit>/),
+#                                  then the kit's own check of every file against its pinned sha256. Once; files already there stay
+#   esmfold2 stage [--weights DIR] copy the weights to node-local disk (EFS_WEIGHTS_LOCAL), once per job: `pred` reuses the copy.
+#                                  Run it before starting several predictions side by side (they would otherwise queue on its lock)
+#   esmfold2 unstage               remove that copy (27.5 GB of the node's /tmp): end every job with it
+#   esmfold2 pred <route> [--weights DIR] --variant fast|full_nomsa|full_msa --input X.json --out_dir OUT [kit pred options]
+#                                  one process on one GCD (or --n_gpu P with big), with the route's fixes (scripts/ef2.sh):
+#                                    stock        upstream as shipped (`--mode off`)
+#                                    stock-fused  upstream's fused Triton backend (`--mode off --backend fused`)
+#                                    exact        the kit's exact mode: byte-identical to stock-fused, 1.45x faster
+#                                    fast         the kit's fast mode, `tx` off (its NaN fix here): 1.34x exact, its own numerics
+#                                    big          the memory mode; --n_gpu 2|4|8 row-shards one input over that many GCDs
+#                                  add --det 1 for the kit's deterministic recipe (byte-reproducible runs)
+#   esmfold2 compare A B           two output directories: byte identity, else coordinates, PAE / pLDDT and rows
+#   esmfold2 check [--no-gpu] [--weights DIR] [--predict]
+#                                  versions, pins, GPUs, where every GPU library was loaded from; with weights, the kit's sha256 check;
+#                                  with --predict, the 1BRS example through stock-fused and exact, compared byte for byte
+#   esmfold2 kit <verb> ...        the kit's own run.sh (through scripts/ef2-run.sh: two lines changed for ROCm, checked)
+#   esmfold2 version | python ... | shell ... | help
+#
+# Weights: --weights DIR or EFS_WEIGHTS=DIR. Setonix starts every job from a fresh login environment (SBATCH_EXPORT=NONE): set what
+# you need inside the job script. The image is read-only, so three writable places, each overridable:
+#   EFS_LOCAL          temporaries and the run.sh copy                    default $TMPDIR/efs-<user>-<job> (node-local)
+#   EFS_CACHE          compiled Triton kernels, the kit's digest memo     default $TMPDIR/efs-cache-<user>-<job>; point it at /scratch to
+#                                                                          keep the first run's compile (minutes) for later jobs
+#   EFS_WEIGHTS_LOCAL  the staged weights                                 default /tmp/efs-weights-<user>-<job>
+# EFS_STAGE=0 reads the weights in place instead (slow from Lustre). EFS_ALLOC=True gives exact / fast the kit's own allocator setting:
+# one long input then fits 1,900 tokens on a GCD instead of 1,800, but a process folding many inputs runs out of memory.
+set -eu
+
+note() { printf '[esmfold2] %s\n' "$*" >&2; }
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` function are dropped. Slurm's variables, ROCR_VISIBLE_DEVICES and the port's EFS_* words pass through.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT HIP_PATH HSA_PATH ROCM_HOME \
+         HIP_PLATFORM BASH_ENV ENV LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_ VIRTUAL_ENV MODEL_OPT \
+         MODEL_OPT_JIT_ROOT TRITON_CACHE_DIR TORCH_EXTENSIONS_DIR TORCHINDUCTOR_CACHE_DIR ESMFOLD2_OPT_WEIGHTS_MEMO_DIR TORCH_HOME HF_HOME \
+         PYTORCH_CUDA_ALLOC_CONF PYTORCH_HIP_ALLOC_CONF PYTORCH_ALLOC_CONF; do
+  unset "$v" 2>/dev/null || true
+done
+W=/opt/esmfold2
+U=$(id -un 2>/dev/null || echo "u$(id -u)")
+J=${SLURM_JOB_ID:-$$}
+B=${TMPDIR:-/tmp}
+export EFS_ROOT=$W USER=${USER:-$U} ROCM_PATH=/opt/rocm PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+       PATH=$W/scripts/bin:$W/venv/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export EFS_LOCAL=${EFS_LOCAL:-$B/efs-$U-$J} EFS_CACHE=${EFS_CACHE:-$B/efs-cache-$U-$J} \
+       EFS_WEIGHTS_LOCAL=${EFS_WEIGHTS_LOCAL:-/tmp/efs-weights-$U-$J}
+mkdir -p "$EFS_LOCAL" "$EFS_CACHE" 2>/dev/null || { note "cannot create $EFS_LOCAL or $EFS_CACHE (set EFS_LOCAL / EFS_CACHE)"; exit 2; }
+export MODEL_OPT_JIT_ROOT=$EFS_CACHE/jit TORCH_HOME=$EFS_CACHE/torch
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+# 2. pred takes its route first; then --weights DIR (pred, stage, check) -> EFS_WEIGHTS
+route=""
+case "$cmd" in pred|predict) route=${1:-}; [ $# -gt 0 ] && shift ;; esac
+if [ "${1:-}" = "--weights" ]; then
+  [ $# -ge 2 ] || { note "--weights needs a directory"; exit 2; }
+  EFS_WEIGHTS=$2; shift 2
+fi
+if [ -n "${EFS_WEIGHTS:-}" ]; then
+  export EFS_WEIGHTS EFS_WEIGHTS_SRC=$EFS_WEIGHTS HF_HOME=$EFS_WEIGHTS
+fi
+need_weights() {
+  [ -n "${EFS_WEIGHTS:-}" ] && [ -d "$EFS_WEIGHTS/hub" ] || { note "no weights: give --weights DIR or EFS_WEIGHTS=DIR, the directory \`esmfold2 fetch-weights DIR\` filled (DIR/hub/...)"; exit 2; }
+}
+
+# 3. Every verb below sources the port's own scripts/ef2-env.sh first: the venv, the nvidia-smi shim (the kit identifies the GPU with
+#    it), the kit's paths and caches, DEBUG_CLR_GRAPH_PACKET_CAPTURE=0, the boot-fix directory on PYTHONPATH. It returns 97 if the tree
+#    is incomplete. scripts/ef2.sh then sets each route's fixes and HIP_LAUNCH_BLOCKING=1.
+case "$cmd" in
+  pred|predict)
+    case "$route" in stock|stock-fused|exact|fast|big) ;; *) note "pred needs a route first: stock | stock-fused | exact | fast | big (esmfold2 help)"; exit 2 ;; esac
+    need_weights
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ef2-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/ef2.sh" "${@:2}"' _ "$W" "$route" "$@" ;;
+  stage)
+    need_weights
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ef2-env.sh" > /dev/null || exit 97; . "$1/scripts/ef2-stage.sh" >&2; echo "$EFS_WEIGHTS_LOCAL"' _ "$W" ;;
+  unstage)
+    rm -rf "$EFS_WEIGHTS_LOCAL" "$EFS_WEIGHTS_LOCAL.lock"; note "removed $EFS_WEIGHTS_LOCAL"; exit 0 ;;
+  fetch-weights)
+    [ $# -ge 1 ] || { note "usage: esmfold2 fetch-weights DIR"; exit 2; }
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ef2-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/fetch-weights.sh" "${@:2}"' _ "$W" "$@" ;;
+  compare)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ef2-env.sh" > /dev/null || exit 97; exec python "$1/tools/ef2_compare.py" "${@:2}"' _ "$W" "$@" ;;
+  kit)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ef2-env.sh" > /dev/null || exit 97; exec bash "$1/scripts/ef2-run.sh" "${@:2}"' _ "$W" "$@" ;;
+  check)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ef2-env.sh" > /dev/null 2>&1 || exit 97
+                              exec python "$1/container/esmfold2_check.py" "${@:2}"' _ "$W" "$@" ;;
+  version)
+    cat $W/source.txt $W/kit.txt $W/rocm-packages.txt 2>/dev/null
+    grep -E '^(torch|triton-rocm|numpy|esm|transformers)( @ |==)' $W/environment/image-freeze.txt 2>/dev/null | sed 's/==/ /; s/ @ git+/ /'
+    exit 0 ;;
+  python)
+    exec $CLEAN /bin/bash -c '. "$1/scripts/ef2-env.sh" > /dev/null 2>&1; exec python "${@:2}"' _ "$W" "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (esmfold2 help)"; exit 2 ;;
+esac

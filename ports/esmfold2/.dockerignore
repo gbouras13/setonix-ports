@@ -1,0 +1,12 @@
+# Build context = ports/esmfold2 (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/esmfold2
+!container/esmfold2_check.py
+!container/prune_rocm_arch.py
+!environment
+!scripts
+!tools
+!inputs
+**/__pycache__
+**/*.pyc
+**/.DS_Store
