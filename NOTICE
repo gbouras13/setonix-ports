@@ -69,7 +69,7 @@ The esmfold2 image (ports/esmfold2/container/Dockerfile) contains, besides ROCm 
     git at the commits the kit pins.
   - The ESMFold2 optimisation kit, anthropics/uplifting-biomolecular-modeling (Copyright 2026 Anthropic, PBC): Apache License 2.0, with
     its third-party licence texts (esmfold2/third_party_licenses/), at /opt/esmfold2/kit.
-  - PyTorch 2.14.0+rocm7.2 (BSD 3-Clause, with the ROCm 7.2 libraries its wheel bundles), triton-rocm 3.8.0 (MIT), DockQ (installed
+  - PyTorch 2.14.0+rocm7.2 (BSD 3-Clause, with the ROCm 7.2 libraries its wheel bundles), triton-rocm 3.8.0 (MIT), DockQ (MIT;
     from git at the kit's pin), and the other Python packages of ports/esmfold2/environment/requirements.lock, each under its own licence.
   - CPython 3.12.12 (PSF License), from python-build-standalone.
   The ESMFold2, ESMFold2-Fast and ESMC-6B weights are not included: `esmfold2 fetch-weights` downloads them from Hugging Face (biohub)

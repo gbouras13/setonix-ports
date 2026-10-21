@@ -77,6 +77,8 @@ RUN git clone --quiet --filter=blob:none --no-checkout "$KIT_REPO" /opt/esmfold2
 #
 # The prune: of the ~14 GiB in torch/, ~6 GiB are GPU kernels for cards that are not this one (hipBLASLt, rocBLAS, aotriton, MIOpen's
 # databases); it runs in the same layer as the install, so the layer never holds the unpruned tree.
+# CC=gcc: python-build-standalone's interpreter records clang as its compiler, which this image does not carry; the lock's one C
+# extension (DockQ's operations module, a scoring tool the folds never import) builds with gcc, as it did natively.
 ARG PRUNE_GPU_ARCH=gfx90a
 ARG TORCH_INDEX=https://download.pytorch.org/whl/rocm7.2
 COPY container/prune_rocm_arch.py /opt/esmfold2/container/
@@ -84,6 +86,7 @@ COPY environment/requirements.lock /opt/esmfold2/environment/
 COPY scripts/efs_pins.py /opt/esmfold2/scripts/
 RUN /opt/python/bin/python3.12 -m venv /opt/esmfold2/venv \
  && P=/opt/esmfold2/venv/bin/python \
+ && export CC=gcc CXX=g++ \
  && grep -v -E '^(#|$)' /opt/esmfold2/environment/requirements.lock > /tmp/lock.txt \
  && grep -E '^pip==' /tmp/lock.txt > /tmp/pip.txt \
  && grep -v -E '^pip==' /tmp/lock.txt > /tmp/stack.txt \
