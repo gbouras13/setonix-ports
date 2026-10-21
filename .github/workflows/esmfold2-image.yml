@@ -8,7 +8,9 @@ name: esmfold2 image
 
 on:
   push:
-    branches: [main]
+    # esmfold2-image: TEMPORARY, so the branch publishes :esmfold2-image for validation on Setonix before the merge (workflow_dispatch
+    # needs the file on main). Remove before merging.
+    branches: [main, esmfold2-image]
     paths:
       - ports/esmfold2/container/**
       - ports/esmfold2/scripts/**
