@@ -3,7 +3,16 @@
 ESMFold2 and ESMFold2-Fast (Biohub `esm` 3.3.0 with its `transformers` fork 4.57.6, and the ESMC-6B language model) on Setonix's MI250X
 GCDs, through the optimisation kit's modes, with the fixes that make them run on gfx90a. The evidence is in `af3-setonix/ESMFOLD2_PORT.md`.
 
-**Status: not yet validated on Setonix** (`slurm/validate.sbatch` compares this image with the native port, byte for byte).
+- **Validated on Setonix** (2026-10-21), image `esmfold2-image` (source 61cc14a), digest `sha256:2a943740…` (job 51303129, every section
+  passes):
+  - `esmfold2 check --predict` on all 8 GCDs: the tree, the kit's pin check, the weights through the kit's own sha256 check, every GPU
+    library loaded from inside the image, and 1BRS (199 tokens) through stock-fused and `exact` inside the image, byte-identical.
+  - The 48 bench targets (and the 11 MSA inputs) through every route in the image, `--det 1`: `exact`, `fast`, stock-fused on
+    ESMFold2-Fast and on ESMFold2, `exact` with MSAs, `big` — byte-identical to the native port (job valid6 51248511; 48/48 on each,
+    11/11 with MSAs), at native speed (`exact` 619 s against 654, `fast` 513 against 489, stock-fused 889 against 946, `big` 1,361
+    against 1,403).
+  - `esmfold2 fetch-weights`: the 16 files from Hugging Face (27.5 GB in 22 minutes), the kit's sha256 check, and identical to the
+    native copies.
 
 What the native port measured (48 recent PDB monomers, 105-497 residues; one process per GCD, all eight GCDs of a node busy; library
 defaults: 20 recycles, 200 sampling steps, 1 sample; job valid6 51248511):
