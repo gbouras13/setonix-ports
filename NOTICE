@@ -63,6 +63,17 @@ The opendde image (ports/opendde/container/Dockerfile) contains, besides the ROC
   - CPython 3.12.12 (PSF License), from python-build-standalone.
   The OpenDDE checkpoint and its data files are not included: `opendde fetch-weights` downloads them from their upstream sources.
 
+The openfold3 image (ports/openfold3/container/Dockerfile) contains, besides the ROCm components above:
+  - OpenFold3 0.5.0 (aqlaboratory/openfold-3, tag v0.5.0, commit c4771653c5d0a3ebb0b3af71b05efd64bc44ee86; the OpenFold Consortium):
+    Apache License 2.0, at /opt/openfold3/openfold3, with the port's patches (ports/openfold3/patches).
+  - The OpenFold3 optimisation kit's adapter and shared core, anthropics/uplifting-biomolecular-modeling (Copyright 2026 Anthropic, PBC):
+    Apache License 2.0, with its own third-party notices, at /opt/openfold3/of3_opt_src and /opt/openfold3/opt_core_src (licences in
+    /opt/openfold3/licenses/kit-openfold3 and opt_core_src/opt_core).
+  - PyTorch 2.14.0+rocm7.2 (BSD 3-Clause, with the ROCm 7.2 libraries its wheel bundles), triton-rocm 3.8.0 (MIT), RDKit (BSD 3-Clause),
+    and the other Python packages of ports/openfold3/environment/requirements.lock, each under its own licence.
+  - CPython 3.12.12 (PSF License), from python-build-standalone.
+  The OpenFold3 checkpoint is not included: `openfold3 fetch-weights` downloads it from OpenFold3's public bucket at the user's request.
+
 MODEL PARAMETERS ARE NOT INCLUDED
 
 No image and no file in this repository contains model weights or parameters. The AlphaFold 3 model parameters are available from
