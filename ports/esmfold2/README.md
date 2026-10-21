@@ -19,7 +19,7 @@ defaults: 20 recycles, 200 sampling steps, 1 sample; job valid6 51248511):
 Accuracy against the deposited structures is the same on every route (US-align TM-score 0.958 mean, 0.981 median for ESMFold2-Fast).
 
 Longest input (3 recycles, 50 steps): one GCD 1,800 tokens on `exact` / `fast` (1,900 with `EFS_ALLOC=True`, one input per process),
-1,800 on `big`, 1,800 on stock shipped, 1,600 on stock fused; `big --n_gpu 2` 4,500 tokens, `--n_gpu 4` 6,500, `--n_gpu 8` below 10,000.
+1,800 on `big`, 1,800 on stock shipped, 1,600 on stock fused; `big --n_gpu 2` 4,500 tokens, `--n_gpu 4` 6,500, `--n_gpu 8` below 9,000 (the kit's allocator holds memory back on ROCm 7.2: P=8 buys nothing over P=4).
 
 ## What makes it run on gfx90a
 
