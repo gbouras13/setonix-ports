@@ -3,7 +3,8 @@
 Protenix v2 (`protenix` 2.0.0, ByteDance) on Setonix's MI250X GCDs, through the optimisation kit's `big` line, with the recipe that
 makes it run on gfx90a. The evidence is in `af3-setonix/PROTENIX_PORT.md`.
 
-**Status: not yet validated on Setonix** (`slurm/validate.sbatch` compares this image with the native port, byte for byte).
+**Status: not yet validated on Setonix** (`slurm/validate.sbatch` compares this image with the native port, byte for byte). Its first
+run (job 51182155) stopped at the weights fetch: the checkpoint mirror is gone (see "The checkpoint" below).
 
 What the native port measured:
 
@@ -54,9 +55,8 @@ singularity exec $SIF protenix compare out_a out_b                             #
 
 - Inputs are Protenix JSON, and stock's options pass through (`--seeds`, `--cycle`, `--step`, `--sample`, `--use_msa`). The launcher
   adds `--model_name protenix-v2 --triatt_kernel torch --trimul_kernel torch` unless you give them.
-- The weights: upstream's own checkpoint URL answers HTTP 403. `fetch-weights` takes the checkpoint from a Hugging Face mirror
-  (`TMF001/protenix-v2-weights`), as the native port did, and keeps it only if its sha256 is the kit's pin. The six data caches come
-  from upstream through the kit's own routine. A checkpoint you already have can go to `DIR/checkpoint/protenix-v2.pt` first.
+- The weights: `fetch-weights` gets the six data caches from upstream's own server, through the kit's routine. The checkpoint is the
+  hard part (see "The checkpoint" below).
 - One GCD above about 2,500 tokens: add `PXS_TRIATT_CHUNK_CAP=4`, as the native 3,584-token run had. It bounds stock's
   triangle-attention logits and changes only memory and speed.
 - `--n_gpu P` puts its ranks on the first P GCDs the process sees, so give concurrent runs their own `ROCR_VISIBLE_DEVICES`.
@@ -65,6 +65,21 @@ singularity exec $SIF protenix compare out_a out_b                             #
 - Deterministic runs: `PXS_DETERMINISTIC=1 CUBLAS_WORKSPACE_CONFIG=:4096:8`, with `stock` rather than `pred --mode off`, which refuses
   the deterministic hook.
 - `protenix kit ...` runs the kit's own CLI (`python -m protenix_opt`) in the port's environment, without the recipe.
+
+## The checkpoint
+
+`checkpoint/protenix-v2.pt` is pinned by the kit: 1,859,785,497 bytes, sha256
+`8f931f9774a396b67033d0e58628e1834f4a1448165e04254b40a780b0c0d599`. Any copy with that digest is the same file. `fetch-weights` keeps
+a download only if it matches (`tools/fetch_checkpoint.sh`), and the kit checks it again on every run.
+
+| source | state (checked 2026-10-23) |
+|---|---|
+| upstream, `protenix.tos-cn-beijing.volces.com/checkpoint/protenix-v2.pt` (the kit's own route) | HTTP 403 |
+| Hugging Face `TMF001/protenix-v2-weights`, the mirror the native port used on 2026-09-23 and `fetch-weights` still asks | HTTP 401 (first seen 2026-10-20, job 51182155): the repository is gone or private |
+| Hugging Face `fredzzp/protenix-v2`, `checkpoint/protenix-v2.pt` | public, not gated, no licence stated; its LFS sha256 and size are the pin. Not yet used by this port |
+
+Until `fetch-weights` has a working source, put a copy with the pinned digest at `DIR/checkpoint/protenix-v2.pt` first.
+`protenix fetch-weights DIR` then keeps it, fetches the six data caches, and checks all seven ("WEIGHTS OK: 7/7").
 
 ## Files
 
