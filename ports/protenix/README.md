@@ -4,7 +4,8 @@ Protenix v2 (`protenix` 2.0.0, ByteDance) on Setonix's MI250X GCDs, through the 
 makes it run on gfx90a. The evidence is in `af3-setonix/PROTENIX_PORT.md`.
 
 **Status: not yet validated on Setonix** (`slurm/validate.sbatch` compares this image with the native port, byte for byte). Its first
-run (job 51182155) stopped at the weights fetch: the checkpoint mirror is gone (see "The checkpoint" below).
+run (job 51182155) stopped at the weights fetch, because the checkpoint mirror is gone. `fetch-weights` now asks another (see "The
+checkpoint" below).
 
 What the native port measured:
 
@@ -75,11 +76,12 @@ a download only if it matches (`tools/fetch_checkpoint.sh`), and the kit checks 
 | source | state (checked 2026-10-23) |
 |---|---|
 | upstream, `protenix.tos-cn-beijing.volces.com/checkpoint/protenix-v2.pt` (the kit's own route) | HTTP 403 |
-| Hugging Face `TMF001/protenix-v2-weights`, the mirror the native port used on 2026-09-23 and `fetch-weights` still asks | HTTP 401 (first seen 2026-10-20, job 51182155): the repository is gone or private |
-| Hugging Face `fredzzp/protenix-v2`, `checkpoint/protenix-v2.pt` | public, not gated, no licence stated; its LFS sha256 and size are the pin. Not yet used by this port |
+| Hugging Face `TMF001/protenix-v2-weights`: the native port's mirror on 2026-09-23, and `fetch-weights`' until 2026-10-23 | HTTP 401 (first seen 2026-10-20, job 51182155): the repository is gone or private |
+| Hugging Face `fredzzp/protenix-v2`, `checkpoint/protenix-v2.pt` | public, not gated, no licence stated; its LFS sha256 and size are the pin. **`fetch-weights` asks it since 2026-10-23** (the user's decision) |
 
-Until `fetch-weights` has a working source, put a copy with the pinned digest at `DIR/checkpoint/protenix-v2.pt` first.
-`protenix fetch-weights DIR` then keeps it, fetches the six data caches, and checks all seven ("WEIGHTS OK: 7/7").
+If that source goes too, `PXS_CHECKPOINT_URL=<url>` points `fetch-weights` at another one, and the pin still decides whether the file is
+kept. Or put a copy with the pinned digest at `DIR/checkpoint/protenix-v2.pt` first. `protenix fetch-weights DIR` then keeps it,
+fetches the six data caches, and checks all seven ("WEIGHTS OK: 7/7").
 
 ## Files
 
