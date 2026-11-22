@@ -4,15 +4,18 @@
 # <checkpoint>.part, compare its sha256 with stock/PINS.json, and only then
 # rename it into place. Nothing loads the file before the digest matches.
 #
-# Source: upstream's URL answers HTTP 403 (kit README 'Setup'); the Hugging Face
-# repo TMF001/protenix-v2-weights carries a file whose LFS sha256 and size equal
-# the pin exactly (checked 2026-09-23). Use of this mirror was approved by the
-# user; the pin check below is what makes the source irrelevant.
+# Source: upstream's URL answers HTTP 403 (kit README 'Setup'). The Hugging Face
+# repo TMF001/protenix-v2-weights, approved by the user and used on 2026-09-23,
+# answers HTTP 401 (first seen 2026-10-20). fredzzp/protenix-v2 carries
+# checkpoint/protenix-v2.pt with an LFS sha256 and size equal to the pin
+# (checked 2026-10-23); the user approved it on 2026-10-23.
+# PXS_CHECKPOINT_URL=<url> asks any other source instead. The pin check below is
+# what makes the source irrelevant.
 set -euo pipefail
 W=${1:?usage: fetch_checkpoint.sh <weights root>}
 PIN_SHA=8f931f9774a396b67033d0e58628e1834f4a1448165e04254b40a780b0c0d599
 PIN_BYTES=1859785497
-URL=https://huggingface.co/TMF001/protenix-v2-weights/resolve/main/protenix-v2.pt
+URL=${PXS_CHECKPOINT_URL:-https://huggingface.co/fredzzp/protenix-v2/resolve/main/checkpoint/protenix-v2.pt}
 F=$W/checkpoint/protenix-v2.pt
 mkdir -p "$W/checkpoint"
 if [ -f "$F" ]; then
