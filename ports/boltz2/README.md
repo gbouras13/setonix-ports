@@ -61,6 +61,10 @@ None of these is an edit to a kit file (`af3-setonix/BOLTZ2_PORT.md` has the mea
    port must run kernels off, so fast ran stock's chunked attention. `scripts/b2s_launch.py` puts the block on its `flash` variant
    (opt_core's own kernel, no cuEquivariance), and the boot word `pairblock_kernels` lets it serve under kernels off. Every call it
    declines runs stock's code exactly as before. `B2S_FAST_FLASH=0` opts out.
+6. **hipBLAS warmed before a graph capture.** exact's captured roll-out calls `torch.det`, and when that is the process's first hipBLAS
+   call, hipBLAS creates its handle inside the capture, which invalidates it (issue #9). The boot word `hipblas_warm`, a
+   `scripts/b2s_launch.py` default for `exact` and `fast`, runs one tiny `det` and matmul before each capture. No value changes.
+   `B2S_HIPBLAS_WARM=0` opts out.
 
 ## Using the image
 
