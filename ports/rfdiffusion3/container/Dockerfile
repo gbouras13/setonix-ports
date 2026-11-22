@@ -75,6 +75,8 @@ RUN git clone --quiet --filter=blob:none --no-checkout "$KIT_REPO" /opt/rfdiffus
  && echo "upstream rc-foundry from the kit's own archive stock/foundry-4010e3e.tar.gz" > /opt/rfdiffusion3/upstream.txt
 
 # ------------------------------------------------------------------------------------------------ 4. apex 0.1, for THIS card
+# The build needs the headers torch's ATen/hip/HIPContextLight.h includes under hipcc (hipSPARSE, hipBLAS, hipBLASLt, hipSOLVER; rocThrust is
+# in step 1): installed for this step and purged in the same layer, since the image runs on torch's own copies of those libraries.
 # No public apex wheel exists for this stack, and a kit mode refuses to run without apex (upstream's import guard binds its FusedRMSNorm
 # as every RMSNorm; absent, the KERNELS census reads `rmsnorm=fallback` and the pass is refused, exit 5). Only the one extension upstream
 # actually uses is built -- apex's own setup.py has no ROCm path at this commit and would build twelve, none of the other eleven imported
@@ -91,7 +93,9 @@ ARG TORCH_INDEX_FOR_APEX=https://download.pytorch.org/whl/rocm7.2
 COPY patches/ /opt/rfdiffusion3/patches/
 COPY container/apex_fusedln_setup.py /opt/rfdiffusion3/container/
 COPY environment/requirements.lock /opt/rfdiffusion3/environment/
-RUN git clone --quiet "$APEX_REPO" /tmp/apex \
+RUN apt-get update --quiet \
+ && apt-get install --yes --quiet --no-install-recommends hipsparse-dev hipblas-dev hipblaslt-dev hipsolver-dev \
+ && git clone --quiet "$APEX_REPO" /tmp/apex \
  && git -C /tmp/apex -c advice.detachedHead=false checkout --quiet "$APEX_COMMIT" \
  && test "$(git -C /tmp/apex rev-parse HEAD)" = "$APEX_COMMIT" \
  && git -C /tmp/apex apply /opt/rfdiffusion3/patches/apex-rocm-build.patch \
@@ -108,7 +112,9 @@ RUN git clone --quiet "$APEX_REPO" /tmp/apex \
  && ( cd /tmp/apex && APEX_CPP_EXT=1 APEX_CUDA_EXT=1 CC=gcc CXX=g++ \
         /tmp/apexbuild/bin/python /opt/rfdiffusion3/container/apex_fusedln_setup.py bdist_wheel -d /tmp/apexwheel ) \
  && ls -la /tmp/apexwheel \
- && rm -rf /tmp/apexbuild
+ && rm -rf /tmp/apexbuild \
+ && apt-get purge --yes --quiet --auto-remove hipsparse-dev hipblas-dev hipblaslt-dev hipsolver-dev \
+ && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------------------------------------ 5. the two interpreters
 # Both get the same packages (--no-deps: every package at the version the native port validated), upstream from the kit's own archive,
