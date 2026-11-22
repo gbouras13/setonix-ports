@@ -80,14 +80,19 @@ RUN git clone --quiet --filter=blob:none --no-checkout "$KIT_REPO" /opt/af3jax/u
 
 # ------------------------------------------------------------------------------------------------ 4. the stock environment
 # The kit's lock minus its 15 CUDA lines plus the two ROCm lines of the same jax release (scripts/setup-stock-stack.sh's derivation).
+# Plus requests and its HTTP stack, which the kit's lock lacks: AlphaFold 3's --use_msa_server path imports it
+# (alphafold3/data/msa_server.py), so without them the README's own MSA-server example failed for every input (issue #8).
 RUN L=/opt/af3jax/ubm/af3_jax/environment/requirements.lock \
  && n=$(grep -cE '^(nvidia-[a-z0-9-]+-cu12|jax-cuda12-(pjrt|plugin))==' "$L") \
  && [ "$n" = 15 ] || { echo "expected 15 CUDA lines in $L, found $n" >&2; exit 1; } \
  && jv=$(sed -n 's/^jax==//p' "$L") && [ -n "$jv" ] \
  && grep -vE '^(nvidia-[a-z0-9-]+-cu12|jax-cuda12-(pjrt|plugin))==' "$L" > /opt/af3jax/requirements-rocm.lock \
  && printf 'jax-rocm7-plugin==%s\njax-rocm7-pjrt==%s\n' "$jv" "$jv" >> /opt/af3jax/requirements-rocm.lock \
+ && printf '%s\n' requests==2.34.2 urllib3==2.8.0 certifi==2026.7.22 idna==3.20 charset-normalizer==3.5.1 \
+      >> /opt/af3jax/requirements-rocm.lock \
  && /opt/python/bin/python3.12 -m uv venv --python /opt/python/bin/python3.12 /opt/af3jax/stockenv \
- && /opt/python/bin/python3.12 -m uv pip install --python /opt/af3jax/stockenv/bin/python --no-cache --no-deps -r /opt/af3jax/requirements-rocm.lock
+ && /opt/python/bin/python3.12 -m uv pip install --python /opt/af3jax/stockenv/bin/python --no-cache --no-deps -r /opt/af3jax/requirements-rocm.lock \
+ && /opt/af3jax/stockenv/bin/python -c 'import requests, certifi; print("requests", requests.__version__)'
 
 # ------------------------------------------------------------------------------------------------ 5. AlphaFold 3: the fork + its wheel
 # The fork at the kit's pin with its one declared patch, at /opt/af3jax/alphafold (a real directory: the wrapper copies it to TMPDIR
