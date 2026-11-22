@@ -187,6 +187,25 @@ def fast_flash_defaults(argv) -> str:
     return ",".join(set_now) or "already-set"
 
 
+HIPBLAS_WARM_MODES = ("exact", "fast")
+
+
+def hipblas_warm_defaults(argv) -> str:
+    """The boot word hipblas_warm, on by default for `pred --mode exact | fast` (the modes that capture the sampler roll-out as a HIP
+    graph; B2S_HIPBLAS_WARM=0 opts out): hipBLAS's handle is created before the capture, not inside it (issue #9). Returns what was set."""
+    args = list(argv or [])
+    if os.environ.get("B2S_HIPBLAS_WARM", "1").strip() == "0":
+        return ""
+    if not args or args[0] != "pred" or _mode(args) not in HIPBLAS_WARM_MODES:
+        return ""
+    patches = [p.strip() for p in os.environ.get("B2S_WORKER_PATCHES", "").split(",") if p.strip()]
+    if "hipblas_warm" in patches:
+        return "already-set"
+    patches.append("hipblas_warm")
+    os.environ["B2S_WORKER_PATCHES"] = ",".join(patches)
+    return "hipblas_warm"
+
+
 def _compose_big_row(M, base: str) -> dict:
     """`big`'s row as the kit's own modes.py composes it with BIG_ATTN_BASE = <base>: the module's source executed once more in a private
     namespace with that one constant changed (modes.py imports only the standard library and .registry). Nothing on disk changes."""
@@ -289,6 +308,9 @@ def main(argv=None) -> int:
     ff = fast_flash_defaults(args)
     if ff:
         _say(f"fast_flash=on ({ff}; B2S_FAST_FLASH=0 opts out)")
+    hw = hipblas_warm_defaults(args)
+    if hw:
+        _say(f"hipblas_warm=on ({hw}; B2S_HIPBLAS_WARM=0 opts out)")
     apply()
     from boltz2_opt.__main__ import main as kit_main     # the kit's own entry: core pin gate, module check, then cli.main
     return kit_main(argv)

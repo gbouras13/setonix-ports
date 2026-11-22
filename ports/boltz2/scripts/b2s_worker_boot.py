@@ -55,6 +55,13 @@ B2S_WORKER_PATCHES (comma list):
                      now); after it, one outer forward hands the block use_kernels=True. Any other variant is left alone. Added for
                      fast on one GCD by b2s_launch.py's fast flash default (2026-10-12; B2S_FAST_FLASH=0 opts out). Measured
                      (fastflash 50659670): 2.89x stock with the row patch, deterministic, 0.13 A from the big default.
+  hipblas_warm       before every HIP graph capture (torch.cuda.CUDAGraph.capture_begin: the kit's captured sampler roll-out), one
+                     3x3 torch.det and one 16x16 matmul on the current device and stream, so hipBLAS's handle and workspace exist before
+                     the capture starts. Without it the first hipBLAS call of the process can fall inside the capture (exact's tail
+                     alignment: F[..., -1, -1] = torch.det(rot_matrix)), where hipblasCreate allocates, the capture is invalidated
+                     (hipErrorStreamCaptureInvalidated) and exact either fails the item or falls back to eager and refuses at rc 3
+                     (setonix-ports issue #9). Creating a handle earlier changes no arithmetic. Added for `pred --mode exact | fast`
+                     by b2s_launch.py (B2S_HIPBLAS_WARM=0 opts out).
 Every refusal word contains `b2s` so it can be read back from the worker log's census lines.
 """
 from __future__ import annotations
@@ -66,7 +73,7 @@ import sys
 
 PATCHES = tuple(p.strip() for p in os.environ.get("B2S_WORKER_PATCHES", "").split(",") if p.strip())
 KNOWN = ("transition_no_v2", "trimul_v4_only", "trimul_no_native", "alloc_no_expandable", "xl_no_expandable", "triattn_tiles",
-         "pairblock_kernels")
+         "pairblock_kernels", "hipblas_warm")
 BOOT_ONLY = ("alloc_no_expandable", "triattn_tiles")  # act on the environment at boot, no module hook
 TORCH_CONF = "PYTORCH_CUDA_ALLOC_CONF"
 TRIATTN_TILES_DEFAULT = "128,32,2,4,1,1"
@@ -211,11 +218,35 @@ def _patch_pairblock(mod) -> None:
     _say("patch pairblock_kernels: boltz2_opt.pairblock.apply wrapped (takes effect when the kit attaches its block)")
 
 
+def _patch_graphs(mod) -> None:
+    cls = mod.CUDAGraph
+    orig = cls.capture_begin
+    state = {"n": 0}
+
+    def capture_begin(self, *a, **kw):
+        import torch
+        dev = torch.cuda.current_device()
+        x = torch.eye(3, device=dev) + 1.0
+        torch.det(x)                                   # the call issue #9 saw create hipBLAS's handle inside the capture
+        y = torch.ones(16, 16, device=dev)
+        torch.matmul(y, y)
+        torch.cuda.current_stream().synchronize()
+        state["n"] += 1
+        if state["n"] == 1:
+            _say(f"hipblas_warm: hipBLAS warmed on device {dev} before the first graph capture")
+        return orig(self, *a, **kw)
+
+    capture_begin.__wrapped__ = orig
+    cls.capture_begin = capture_begin
+    _say("patch hipblas_warm: torch.cuda.CUDAGraph.capture_begin warms hipBLAS first")
+
+
 HOOKS = {"transition_no_v2": ("opt_core.kernels.transition", _patch_transition),
          "trimul_v4_only": ("opt_core.kernels.trimul", _patch_trimul),
          "trimul_no_native": ("opt_core.kernels.trimul", _patch_trimul),
          "xl_no_expandable": ("boltz2_opt.big", _patch_big),
-         "pairblock_kernels": ("boltz2_opt.pairblock", _patch_pairblock)}
+         "pairblock_kernels": ("boltz2_opt.pairblock", _patch_pairblock),
+         "hipblas_warm": ("torch.cuda.graphs", _patch_graphs)}
 
 
 class _PostImport(importlib.abc.MetaPathFinder):
