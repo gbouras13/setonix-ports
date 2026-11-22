@@ -39,12 +39,14 @@ ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 PIP_NO_CACHE_DIR=1 PIP_DISABLE_P
 # ------------------------------------------------------------------------------------------------ 1. tools only
 # No ROCm math libraries are installed: the torch 2.14.0+rocm7.2 wheel carries its own complete ROCm 7.2 runtime in torch/lib, which is
 # what the native port runs on too. The base image's hipcc and clang build apex, and only apex -- g++ is its host compiler (torch 2.14
-# compiles extensions as C++20, which Ubuntu 24.04's gcc-13 has). jdupes hardlinks the two interpreters together.
+# compiles extensions as C++20, which Ubuntu 24.04's gcc-13 has). jdupes hardlinks the two interpreters together. rocthrust-dev and
+# rocprim-dev are headers only, for that build: torch's own headers include thrust/complex.h under hipcc (torch/headeronly/util/
+# complex.h), and the base image has no rocThrust (the first CI builds stopped there; the native build had it from the rocm/7.2.4 module).
 RUN mkdir -p /opt/rfdiffusion3 \
  && apt-get update --quiet \
- && apt-get install --yes --quiet --no-install-recommends git curl ca-certificates python3 g++ jdupes \
+ && apt-get install --yes --quiet --no-install-recommends git curl ca-certificates python3 g++ jdupes rocthrust-dev rocprim-dev \
  && rm -rf /var/lib/apt/lists/* \
- && dpkg-query -W -f '${Package} ${Version}\n' rocm-core hip-runtime-amd hsa-rocr comgr \
+ && dpkg-query -W -f '${Package} ${Version}\n' rocm-core hip-runtime-amd hsa-rocr comgr rocthrust-dev rocprim-dev \
       > /opt/rfdiffusion3/rocm-packages.txt
 
 # ------------------------------------------------------------------------------------------------ 2. Python 3.12
