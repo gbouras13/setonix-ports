@@ -83,7 +83,7 @@ sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-por
 #SBATCH --gres=gpu:8
 #SBATCH --exclusive
 #SBATCH --time=01:00:00
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 SIF=/scratch/<project>/$USER/singularity/proteinmpnn_main.sif
 export PMS_LOCAL=/tmp/pms-$USER-$SLURM_JOB_ID && mkdir -p $PMS_LOCAL
 C="singularity exec --bind $PMS_LOCAL:$PMS_LOCAL $SIF proteinmpnn"       # never --rocm

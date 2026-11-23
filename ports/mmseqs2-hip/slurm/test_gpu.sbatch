@@ -32,7 +32,8 @@ PDB=$DB/pdb100/pdb100_230517
 UR=$DB/colabfold_uniref30/uniref30_2302_db
 W=$OUT/run-${SLURM_JOB_ID:-local}; mkdir -p "$W"; cd "$W" || exit 3
 if [ -n "${SIF:-}" ]; then
-  module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+  module load singularity/4.3.5-nohost > /dev/null 2>&1 || module load singularity/4.1.0-nohost > /dev/null 2>&1 \
+  || { echo "ABORT: no singularity/4.3.5-nohost (or 4.1.0-nohost) module"; exit 3; }
   export SINGULARITY_CACHEDIR=${TMPDIR:-/tmp}/sing-cache.$$ APPTAINER_CACHEDIR=${TMPDIR:-/tmp}/sing-cache.$$
   M=(singularity exec "$SIF" mmseqs)   # never --rocm
   CAT=(singularity exec "$SIF" cat)

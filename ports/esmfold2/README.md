@@ -56,7 +56,7 @@ None of these is an edit to a kit or upstream file. `scripts/ef2.sh` (verbatim f
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/esmfold2:main /scratch/<project>/$USER/singularity
 
 # 2. the weights, once (in a compute job): 27.5 GB, every file checked by the kit against its pinned sha256; files already there stay
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 singularity exec $SIF esmfold2 fetch-weights /scratch/<project>/$USER/esmfold2-weights
 
 # 3. in a GPU job (never --rocm)
