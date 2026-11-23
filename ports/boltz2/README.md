@@ -74,7 +74,7 @@ sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-por
 
 # 2. the weights, once: 6.55 GB from Hugging Face (boltz-community, MIT), each file checked against the kit's pinned sha256
 #    (in a compute job; a file already present with the right digest is kept)
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 singularity exec $SIF boltz2 fetch-weights /scratch/<project>/$USER/boltz2-weights
 
 # 3. in a GPU job (never --rocm)

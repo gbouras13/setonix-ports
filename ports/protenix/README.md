@@ -43,7 +43,7 @@ them, each with its reason:
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/protenix:main /scratch/<project>/$USER/singularity
 
 # 2. the weights, once (in a compute job): 2.5 GB, each file checked against the kit's pinned sha256; files already present are kept
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 singularity exec $SIF protenix fetch-weights /scratch/<project>/$USER/protenix-weights
 
 # 3. in a GPU job (never --rocm)

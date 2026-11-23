@@ -59,7 +59,7 @@ sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-por
 
 # 2. the weights, once: the checkpoint (2.6 GB, Hugging Face aurekaresearch/OpenDDE) and four common/ files (0.6 GB), through the kit's
 #    own downloader, each checked against the kit's pinned sha256 (in a compute job; a file already present is kept and checked)
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 singularity exec $SIF opendde fetch-weights /scratch/<project>/$USER/opendde-weights
 
 # 3. in a GPU job (never --rocm)
