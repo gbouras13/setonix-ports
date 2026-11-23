@@ -53,7 +53,7 @@ sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-por
 #SBATCH --nodes=1
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 SIF=$MYSCRATCH/singularity/af3jax_main.sif
 export AF3JAX_CACHE=$MYSCRATCH/af3jax-cache          # compiled programs, reused by later runs of the same size
 singularity exec $SIF af3jax predict --input_dir in/my_complex --output_dir out \

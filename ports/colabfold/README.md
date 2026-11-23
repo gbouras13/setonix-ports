@@ -48,7 +48,7 @@ sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-por
 #SBATCH --gres=gpu:8,tmp:1000G      # the node's NVMe, for the databases (colabfold search)
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 SIF=/scratch/<project>/$USER/singularity/colabfold_main.sif
 singularity exec $SIF colabfold search queries.fasta msas/ --use-templates 1      # MSAs: GPU MMseqs2, databases staged to NVMe
 singularity exec $SIF colabfold predict --mode fast msas/ out/ --num-recycle 3       # every a3m in msas/, one GCD; colabfold_batch options follow
