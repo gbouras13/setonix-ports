@@ -32,7 +32,7 @@ for v in $VENVS; do
   "$W/$v/bin/python" -m pip check
   # the kit's own install verb: its two packages editable, then its pin check (--expect any at this point: the overlay
   # is not in yet for venv-kit, and never will be for venv-stock)
-  PATH="$W/$v/bin:$PATH" sh "$W/kit/rfdiffusion3/run.sh" install
+  PATH="$W/$v/bin:$PATH" bash "$W/kit/rfdiffusion3/run.sh" install   # run.sh is bash (set -o pipefail); sh is dash here
   "$W/$v/bin/python" -m pip freeze --all > "$W/environment/image-freeze-$v.txt"
 done
 
