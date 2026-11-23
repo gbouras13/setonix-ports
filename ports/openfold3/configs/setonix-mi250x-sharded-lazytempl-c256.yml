@@ -1,0 +1,66 @@
+# Sharded runner, MSA-only, with the LAZY TEMPLATE path actually engaged.
+#
+# The tp_rowpair adapter rebinds featurize_template_structures_of3 with a lazy
+# form that emits (T,1,1,F) placeholders instead of dense (T,N,N,F). It is
+# installed in the MAIN process on import of the runner -- but featurization
+# runs in DataLoader workers, which execute the STOCK function: the
+# n_templates=0 traceback lands in pipelines/featurization/template.py:120,
+# the stock body, never in featurize_template_structures_lazy. So the dense
+# tensor is built and the placeholders never appear: measured resident
+# template_distogram (1,1,10395,10395,39) = 15.70 GiB on the 27-mer.
+#
+# num_workers=0 moves featurization into the patched process. Inference has
+# one item per query, so there is nothing to parallelise away.
+model_update:
+  presets:
+  - predict
+  custom:
+    settings:
+      memory:
+        eval:
+          use_triton_triangle_kernels: false
+          use_deepspeed_evo_attention: false
+          use_cueq_triangle_kernels: false
+          use_lma: false
+          tune_chunk_size: false
+          chunk_size: 256          # the pre-2026-10-03 256-row partition (stock-settings reference for slurm/stockcmp.sh; not for production)
+          offload_inference:
+            template_module: false
+            msa_module: false
+            confidence_heads: false
+            token_cutoff: null
+          per_sample_token_cutoff: null
+          per_sample_atom_cutoff: null   # >1 sample per pass (ROWPAIR_SAMPLE_CHUNK) needs it: the tp line refuses OpenFold3's per-sample confidence loop; a no-op at one sample per pass (job 50350036)
+    architecture:
+      template:
+        template_pair_stack:
+          tune_chunk_size: false
+      msa:
+        msa_module:
+          tune_chunk_size: false
+      pairformer:
+        tune_chunk_size: false
+      diffusion_module:
+        diffusion_conditioning:
+          tune_chunk_size: false
+      heads:
+        pairformer_embedding:
+          pairformer:
+            tune_chunk_size: false
+pl_trainer_args:
+  devices: 1
+  num_nodes: 1
+dataset_config_kwargs:
+  template:
+    n_templates: 1
+data_module_args:
+  num_workers: 0
+
+# Full confidences (per-atom pLDDT, PAE, PDE) as npz float32 instead of JSON: the default since 2026-10-01 (user's choice).
+# OpenFold3 writes the JSON with json.dumps(indent=4), one number per line: ~35 s at 2,310 res and ~210 s at 5,772 on rank 0
+# while the other ranks wait; the npz takes 2 s / 9 s and is lossless (job 50230211: arrays within the JSON's 6-decimal
+# rounding, CIFs and aggregated JSON identical). Readers of *_confidences.json switch to *_confidences.npz (np.load; keys
+# plddt, pae, pde). The aggregated-confidence JSON and the structures are unchanged. float16 would halve the bytes again.
+output_writer_settings:
+  full_confidence_output_format: npz
+  full_confidence_output_dtype: float32

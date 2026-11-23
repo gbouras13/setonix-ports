@@ -1,0 +1,14 @@
+# Build context = ports/openfold3 (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/openfold3
+!container/openfold3_check.py
+!container/prune_rocm_arch.py
+!environment
+!patches
+!scripts
+!configs
+!tools
+!tests
+**/__pycache__
+**/*.pyc
+**/.DS_Store

@@ -1,0 +1,187 @@
+#!/bin/sh
+# openfold3 -- entry point of the OpenFold3 Setonix image (ports/openfold3). It keeps the host's software environment out and runs the
+# port's own launcher on the image's tree, /opt/openfold3: the native port's tree (py312/, openfold3/, of3_opt_src/, opt_core_src/, kit/),
+# rebuilt byte for byte, without weights. POSIX sh on purpose: Pawsey's singularity modules export BASH_ENV, which bash would source.
+# Run WITHOUT --rocm, on a whole node (--exclusive): the launcher puts rank r on the node's GCD r.
+#
+#   openfold3 fetch-weights DIR    the OpenBind checkpoint OpenFold3 0.5.0 runs by default (of3-ob-2025-06-30-174k.pt, 2.29 GB) into DIR,
+#                                  through OpenFold3's own downloader from its public bucket (s3://openfold3-data), then checked against
+#                                  the S3 object's own checksums (CRC64NVME, the part-wise MD5 ETag) and its size. Once: a file already
+#                                  there is checked, not fetched again
+#   openfold3 msa -i Q.json -o DIR the query's MSAs from the ColabFold server (OpenFold3's own `run_openfold align-msa-server`) into DIR,
+#                                  and DIR/query_msa.json with absolute paths: the query for predict
+#   openfold3 predict --weights DIR -i Q.json -o OUT [-P auto|2|4|8] [--stock-settings] [--runner YAML] [--templates] [--no-msa]
+#                                  one prediction, row-sharded over P GCDs of the node, through the native launcher
+#                                  (kit/scripts/predict-sharded.sh, verbatim) and its defaults: fp16 fused triangle attention and every
+#                                  other default of af3-setonix/RUNTIME.md. -P auto (the default) takes 2 GCDs up to 1,600 residues, 4 up
+#                                  to 3,100, else 8. --stock-settings switches off every lever that changes values (fp32 PyTorch triangle
+#                                  attention, the confidence head off the fused kernel, rocBLAS trimul, one sample per pass, ATen
+#                                  LayerNorm, the 256-row partition): the port's precision reference. MSA-only unless --templates
+#   openfold3 compare REF OUT ...  per sample: byte identity, CA RMSD and confidence deltas between output directories
+#   openfold3 check [--no-gpu] [--weights DIR]
+#                                  versions, the sources against the native port's digests, GPUs, where every GPU library was loaded from;
+#                                  with weights, the checkpoint against its checksums
+#   openfold3 run_openfold ...     OpenFold3's own CLI in the port's environment, without the launcher (not validated in the image)
+#   openfold3 version | python ... | shell ... | help
+#
+# Weights: --weights DIR or OF3_WEIGHTS=DIR. Setonix starts every job from a fresh login environment (SBATCH_EXPORT=NONE), so set what you
+# need inside the job script; ROWPAIR_* / OF3* / HIP_* / NCCL_* settings pass through to the launcher, which documents each. Scratch for
+# temporaries and caches: OF3_LOCAL, default a directory under TMPDIR (node-local) per invocation. Triton's kernel cache persists in
+# DIR/.triton-cache when the weights directory is writable (ROWPAIR_TRITON_CACHE= for a per-job cache).
+set -eu
+
+note() { printf '[openfold3] %s\n' "$*" >&2; }
+CKPT=of3-ob-2025-06-30-174k.pt
+
+# 1. Nothing of the host's software environment reaches the model process: its Python and loader variables, Lmod's variables and the
+#    exported `module` function are dropped. LD_LIBRARY_PATH too: a host ROCm module's library directory lies under /software, which
+#    Singularity binds, and the loader would search it before torch's own RUNPATH. The native launcher's own roots are reset, so a
+#    native AF3_SETONIX_WORKDIR, KIT_DIR or OPENFOLD_CACHE in the job cannot point the image at the native tree. Slurm's variables,
+#    ROCR_VISIBLE_DEVICES and the port's ROWPAIR_* / OF3* / HIP_* / NCCL_* words pass through.
+for v in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONEXECUTABLE LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH HIP_PATH HSA_PATH \
+         ROCM_HOME HIP_PLATFORM BASH_ENV ENV LMOD_PKG LMOD_CMD LMOD_DIR MODULEPATH MODULESHOME LOADEDMODULES _LMFILES_ VIRTUAL_ENV \
+         AF3_SETONIX_WORKDIR AF3_SETONIX_LOCAL KIT_DIR OPENFOLD_CACHE CONDA_PREFIX CONDA_DEFAULT_ENV OPENFOLD3_OPT; do
+  unset "$v" 2>/dev/null || true
+done
+W=/opt/openfold3
+export OF3_ROOT=$W AF3_SETONIX_WORKDIR=$W ROCM_PATH=/opt/rocm PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+       PATH=$W/py312/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CLEAN="env -u BASH_FUNC_module%% -u BASH_FUNC_ml%% -u BASH_FUNC_which%%"
+PY=$W/py312/bin/python
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+# 2. --weights DIR (predict, check, run_openfold), anywhere on the line -> OF3_WEIGHTS.
+case "$cmd" in
+  predict|check|run_openfold)
+    n=$#; i=0
+    while [ "$i" -lt "$n" ]; do
+      a=$1; shift; i=$((i + 1))
+      case "$a" in
+        --weights)
+          [ "$i" -lt "$n" ] || { note "--weights needs a directory"; exit 2; }
+          OF3_WEIGHTS=$1; shift; i=$((i + 1)); continue ;;
+        --weights=*) OF3_WEIGHTS=${a#--weights=}; continue ;;
+      esac
+      set -- "$@" "$a"
+    done ;;
+esac
+if [ -n "${OF3_WEIGHTS:-}" ]; then
+  [ -d "$OF3_WEIGHTS" ] || { note "weights directory '$OF3_WEIGHTS' does not exist (openfold3 fetch-weights DIR fetches the checkpoint)"; exit 2; }
+  OF3_WEIGHTS=$(cd "$OF3_WEIGHTS" && pwd)
+  export OF3_WEIGHTS
+fi
+case "$cmd" in
+  predict|run_openfold)
+    [ -n "${OF3_WEIGHTS:-}" ] || { note "no weights: give --weights DIR or OF3_WEIGHTS=DIR (openfold3 fetch-weights DIR fetches them)"; exit 2; }
+    [ -s "$OF3_WEIGHTS/$CKPT" ] || { note "no $CKPT in $OF3_WEIGHTS (openfold3 fetch-weights $OF3_WEIGHTS fetches it)"; exit 2; } ;;
+esac
+
+# 3. Writable scratch outside $HOME (1 GB quota on Setonix) and outside the read-only image: one directory per invocation unless OF3_LOCAL
+#    is given, so concurrent runs in one job never share a cache. setonix-env.sh puts the Triton, Inductor, MIOpen and numba caches under
+#    TMPDIR. OPENFOLD_CACHE is a directory of this run's own holding only `ckpt_root`, OpenFold3's pointer to the weights: nothing is
+#    written into the weights directory, it can be read-only or moved, and no stray runner.yml there can merge into the run's yaml.
+T=${OF3_LOCAL:-${TMPDIR:-/tmp}/of3-$(id -u)-${SLURM_JOB_ID:-x}-$$}
+mkdir -p "$T/tmp" "$T/xdg" "$T/of3-cache" 2>/dev/null || { T=$(mktemp -d); mkdir -p "$T/tmp" "$T/xdg" "$T/of3-cache"; }
+export OF3_LOCAL="$T" TMPDIR="$T/tmp" XDG_CACHE_HOME="$T/xdg" OPENFOLD_CACHE="$T/of3-cache"
+[ -n "${OF3_WEIGHTS:-}" ] && printf '%s' "$OF3_WEIGHTS" > "$OPENFOLD_CACHE/ckpt_root"
+if [ -z "${ROWPAIR_TRITON_CACHE+x}" ] && [ -n "${OF3_WEIGHTS:-}" ]; then
+  if mkdir -p "$OF3_WEIGHTS/.triton-cache" 2>/dev/null && [ -w "$OF3_WEIGHTS/.triton-cache" ]; then
+    export ROWPAIR_TRITON_CACHE="$OF3_WEIGHTS/.triton-cache"
+  else
+    export ROWPAIR_TRITON_CACHE=""
+  fi
+fi
+
+case "$cmd" in
+  predict)
+    Q="" OUT_DIR="" NP=auto RUNNER="" STOCK=0 TEMPL=0 NOMSA=0 MSASRV=0 DRY=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -i|--input) Q=${2:?-i needs a query JSON}; shift 2 ;;
+        -o|--out) OUT_DIR=${2:?-o needs a directory}; shift 2 ;;
+        -P|--gcds) NP=${2:?-P needs 2, 4, 8 or auto}; shift 2 ;;
+        --runner) RUNNER=${2:?--runner needs a yaml}; shift 2 ;;
+        --stock-settings) STOCK=1; shift ;;
+        --templates) TEMPL=1; shift ;;
+        --no-msa) NOMSA=1; shift ;;
+        --msa-server) MSASRV=1; shift ;;
+        --dry-run) DRY=1; shift ;;
+        *) note "unknown predict option '$1' (openfold3 help)"; exit 2 ;;
+      esac
+    done
+    [ -n "$Q" ] && [ -s "$Q" ] || { note "give the query JSON with -i (from openfold3 msa, or with your own MSA paths)"; exit 2; }
+    [ -n "$OUT_DIR" ] || { note "give the output directory with -o"; exit 2; }
+    Q=$(cd "$(dirname "$Q")" && pwd)/$(basename "$Q")
+    mkdir -p "$OUT_DIR" && OUT_DIR=$(cd "$OUT_DIR" && pwd)
+    # residues (the launcher's own count: chain_ids x sequence length) and whether every protein chain carries an MSA
+    info=$("$PY" -I "$W/tools/of3_query.py" "$Q") || { note "cannot read the query $Q"; exit 2; }
+    RES=${info%% *}; MSA=${info#* }
+    if [ "$MSA" != all ] && [ "$NOMSA" = 0 ] && [ "$MSASRV" = 0 ]; then
+      note "$MSA protein chain(s) of $Q carry no MSA: run 'openfold3 msa -i $Q -o DIR' and predict DIR/query_msa.json,"
+      note "or add --msa-server (each rank asks the ColabFold server) or --no-msa (single sequence)"
+      exit 2
+    fi
+    case "$NP" in
+      auto) if [ "$RES" -le 1600 ]; then NP=2; elif [ "$RES" -le 3100 ]; then NP=4; else NP=8; fi ;;
+      2|4|8) ;;
+      *) note "-P must be 2, 4, 8 or auto (got $NP)"; exit 2 ;;
+    esac
+    if [ -z "$RUNNER" ]; then
+      if [ "$STOCK" = 1 ]; then RUNNER=$W/kit/configs/setonix-mi250x-sharded-lazytempl-c256.yml
+      else RUNNER=$W/kit/configs/setonix-mi250x-sharded-lazytempl.yml; fi
+    fi
+    [ -s "$RUNNER" ] || { note "runner yaml '$RUNNER' not found"; exit 2; }
+    if [ "$STOCK" = 1 ]; then
+      export ROWPAIR_TRIATT_CORE=torch ROWPAIR_TRIATT_OPERANDS=fp32 ROWPAIR_TRIATT_AUTOCAST_OFF=0 ROWPAIR_TRIMUL_HIPBLASLT=0 \
+             ROWPAIR_SAMPLE_CHUNK=1 ROWPAIR_LN_KERNEL=0
+    fi
+    if [ "$TEMPL" = 1 ]; then export USE_TEMPLATES=true; else export USE_TEMPLATES="${USE_TEMPLATES:-false}"; fi
+    if [ "$MSASRV" = 1 ]; then export USE_MSA_SERVER=true; else export USE_MSA_SERVER="${USE_MSA_SERVER:-false}"; fi
+    export OUT="$OUT_DIR"
+    note "predict: $(basename "$Q"), $RES residues, P=$NP, runner $(basename "$RUNNER"), $([ "$STOCK" = 1 ] && echo 'stock settings' || echo "the port's defaults"), templates=$USE_TEMPLATES msa_server=$USE_MSA_SERVER -> $OUT"
+    if [ "$DRY" = 1 ]; then
+      printf 'PLAN P=%s RUNNER=%s STOCK=%s USE_TEMPLATES=%s USE_MSA_SERVER=%s RES=%s\n' "$NP" "$RUNNER" "$STOCK" "$USE_TEMPLATES" "$USE_MSA_SERVER" "$RES"
+      exit 0
+    fi
+    exec $CLEAN /bin/bash "$W/kit/scripts/predict-sharded.sh" "$Q" "$NP" "$RUNNER" ;;
+  fetch-weights)
+    [ $# -eq 1 ] || { note "usage: openfold3 fetch-weights DIR"; exit 2; }
+    mkdir -p "$1" || exit 2
+    exec $CLEAN "$PY" -I "$W/tools/of3_weights.py" fetch "$(cd "$1" && pwd)" ;;
+  msa)
+    Q="" D=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -i|--input) Q=${2:?-i needs a query JSON}; shift 2 ;;
+        -o|--out) D=${2:?-o needs a directory}; shift 2 ;;
+        *) note "unknown msa option '$1' (openfold3 help)"; exit 2 ;;
+      esac
+    done
+    [ -n "$Q" ] && [ -s "$Q" ] && [ -n "$D" ] || { note "usage: openfold3 msa -i QUERY.json -o DIR"; exit 2; }
+    Q=$(cd "$(dirname "$Q")" && pwd)/$(basename "$Q"); mkdir -p "$D" && D=$(cd "$D" && pwd)
+    exec $CLEAN /bin/bash -c '. "$1/kit/scripts/setonix-env.sh" > /dev/null; cd "$3" || exit 2
+                              run_openfold align-msa-server --query-json "$2" --output-dir "$3" || exit $?
+                              exec python -I "$1/tools/of3_query.py" --absolutize "$3/query_msa.json" "$3"' _ "$W" "$Q" "$D" ;;
+  compare)
+    exec $CLEAN "$PY" -I "$W/tools/of3_outputs.py" compare "$@" ;;
+  check)
+    exec $CLEAN /bin/bash -c '. "$1/kit/scripts/setonix-env.sh" > /dev/null 2>&1; exec python -I "$1/container/openfold3_check.py" "${@:2}"' \
+      _ "$W" "$@" ;;
+  run_openfold)
+    exec $CLEAN /bin/bash -c '. "$1/kit/scripts/setonix-env.sh" > /dev/null; exec run_openfold "${@:2}"' _ "$W" "$@" ;;
+  version)
+    cat $W/source.txt $W/openfold3.txt $W/kit.txt $W/rocm-packages.txt 2>/dev/null
+    grep -E '^(torch|triton-rocm|numpy|rdkit)==|\((openfold3|opt[-_]core|openfold3[-_]opt)==' $W/environment/image-freeze.txt 2>/dev/null \
+      | sed 's/^# Editable install with no version control (\(.*\))$/\1 (editable)/; s/==/ /'
+    exit 0 ;;
+  python)
+    exec $CLEAN /bin/bash -c '. "$1/kit/scripts/setonix-env.sh" > /dev/null 2>&1; exec python "${@:2}"' _ "$W" "$@" ;;
+  shell)
+    exec $CLEAN /bin/bash --noprofile --norc "$@" ;;
+  help|-h|--help)
+    sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+  *)
+    note "unknown command '$cmd' (openfold3 help)"; exit 2 ;;
+esac
