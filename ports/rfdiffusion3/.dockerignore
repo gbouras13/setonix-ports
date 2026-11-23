@@ -1,0 +1,15 @@
+# Build context = ports/rfdiffusion3 (container/Dockerfile): send only what the Dockerfile copies.
+*
+!container/rfdiffusion3
+!container/rfdiffusion3_check.py
+!container/apex_fusedln_setup.py
+!container/build_venvs.sh
+!container/prune_rocm_arch.py
+!environment
+!patches
+!scripts
+!tools
+!tests
+**/__pycache__
+**/*.pyc
+**/.DS_Store

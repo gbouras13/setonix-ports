@@ -15,6 +15,7 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
 | [`protenix`](ports/protenix/) | Protenix v2 with the kit's `big` line: one GCD byte-identical to stock, or row-sharded over a node | launcher, checks, image `ghcr.io/gbouras13/setonix-ports/protenix`, validation job |
 | [`opendde`](ports/opendde/) | OpenDDE 1.1.1 on the kit's big line, one GCD or row-sharded over a node: 2.45x stock at 4,096 tokens, complete to 9,216 | hook chain of eight opt-in fixes, self-check, image `ghcr.io/gbouras13/setonix-ports/opendde`, validation job (not yet run) |
 | [`esmfold2`](ports/esmfold2/) | ESMFold2 and ESMFold2-Fast (Biohub esm 3.3.0) with the kit's modes: `exact` byte-identical to stock and 1.45x it, `fast` 1.93x | routes, boot fixes, weights fetch and stage, image `ghcr.io/gbouras13/setonix-ports/esmfold2` (validated), validation job |
+| [`rfdiffusion3`](ports/rfdiffusion3/) | RFdiffusion3 backbone design, stock's designs at 1.37x per GCD (two interpreters; apex rebuilt for a 64-lane wavefront) | env, in-memory boot fix, comparison tools, image `ghcr.io/gbouras13/setonix-ports/rfdiffusion3`, validation job |
 | `openfold3` | | not yet: ported and validated on Setonix, to follow here |
 
 ## Using an image on Setonix
