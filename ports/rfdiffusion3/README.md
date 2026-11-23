@@ -71,7 +71,7 @@ sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-por
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=01:00:00
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 SIF=/scratch/<project>/$USER/singularity/rfdiffusion3_main.sif
 W=/scratch/<project>/$USER/rfd3-weights          # holds rfd3/rfd3_latest.ckpt
 export RFD_LOCAL=/tmp/rfd-$USER-$SLURM_JOB_ID && mkdir -p $RFD_LOCAL

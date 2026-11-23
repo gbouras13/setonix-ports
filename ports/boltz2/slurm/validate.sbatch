@@ -42,7 +42,8 @@ mkdir -p "$O" && cd "$O" || exit 3
 for f in "$SIF" "$WEIGHTS/boltz2_conf.ckpt" "$WEIGHTS/mols.tar" "$YH"; do
   [ -e "$f" ] || { echo "MISSING: $f"; exit 3; }
 done
-module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+module load singularity/4.3.5-nohost > /dev/null 2>&1 || module load singularity/4.1.0-nohost > /dev/null 2>&1 \
+  || { echo "ABORT: no singularity/4.3.5-nohost (or 4.1.0-nohost) module"; exit 3; }
 L=/tmp/b2s-validate-$USER-${SLURM_JOB_ID:-$$}
 mkdir -p "$L"
 export SINGULARITY_CACHEDIR=$L/sing-cache APPTAINER_CACHEDIR=$L/sing-cache

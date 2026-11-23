@@ -43,7 +43,8 @@ mkdir -p "$O" && cd "$O" || exit 3
 for f in "$SIF" "$NATIVE_W/venv/bin/python" "$NATIVE_W/scripts/pms-env.sh"; do
   [ -e "$f" ] || { echo "MISSING: $f"; exit 3; }
 done
-module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+module load singularity/4.3.5-nohost > /dev/null 2>&1 || module load singularity/4.1.0-nohost > /dev/null 2>&1 \
+  || { echo "ABORT: no singularity/4.3.5-nohost (or 4.1.0-nohost) module"; exit 3; }
 export SINGULARITY_CACHEDIR=/tmp/sing-cache.${SLURM_JOB_ID:-$$} APPTAINER_CACHEDIR=$SINGULARITY_CACHEDIR
 export PMS_LOCAL=/tmp/pms-$USER-${SLURM_JOB_ID:-$$}
 mkdir -p "$PMS_LOCAL"

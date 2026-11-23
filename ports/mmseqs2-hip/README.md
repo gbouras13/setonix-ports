@@ -39,7 +39,7 @@ sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-por
 - **Which GCDs.** The search uses every GCD it sees. Narrow it with `HIP_VISIBLE_DEVICES`.
 
 ```bash
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 M="singularity exec $SIF mmseqs"
 $M createdb queries.fasta qdb
 $M search qdb /scratch/references/colabfold_jun2026/database/pdb100/pdb100_230517 res tmp --gpu 1 --prefilter-mode 1

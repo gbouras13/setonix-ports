@@ -48,7 +48,8 @@ mkdir -p "$T/cache" "$T/tmp"
 trap 'rm -rf "$T"' EXIT
 echo "node-local /tmp: $(df -h /tmp | awk 'NR==2 {print $4 " free of " $2 " (" $1 ")"}')"
 
-module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+module load singularity/4.3.5-nohost > /dev/null 2>&1 || module load singularity/4.1.0-nohost > /dev/null 2>&1 \
+  || { echo "ABORT: no singularity/4.3.5-nohost (or 4.1.0-nohost) module"; exit 3; }
 # after the module, which sets its own cache directory under $MYSOFTWARE
 export SINGULARITY_CACHEDIR=$T/cache SINGULARITY_TMPDIR=$T/tmp APPTAINER_CACHEDIR=$T/cache APPTAINER_TMPDIR=$T/tmp
 echo "singularity: $(singularity --version)"

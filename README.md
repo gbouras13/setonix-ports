@@ -31,7 +31,7 @@ publishes it on ghcr.io. Setonix then pulls it as a Singularity image (SIF).
    the image.
 3. Run it through the port's entry point, for example `singularity exec $SIF af3jax predict ...` (see the port's README).
 
-- Load `singularity/4.1.0-nohost`. It binds `/scratch`, `/software` and `/data/references` into the container.
+- Load `singularity/4.3.5-nohost`. It binds `/scratch`, `/software` and `/data/references` into the container.
 - Never add `--rocm`. It binds the host's ROCm 6.3.0 libraries, whose sonames match the image's 7.2.4 ones.
 - No weights are inside any image, except `proteinmpnn`, whose weights are part of the upstream repository (MIT). Bind your own.
 

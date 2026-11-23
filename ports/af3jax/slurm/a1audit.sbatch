@@ -52,7 +52,8 @@ echo "=== node: $(hostname)  job: $SLURM_JOB_ID  partition: ${SLURM_JOB_PARTITIO
 if [ -n "${AF3JAX_SIF:-}" ]; then
   MODE=container
   OF3W=${OF3_WEIGHTS:-$A1_DATA/weights/p2}
-  module load singularity/4.1.0-nohost > /dev/null 2>&1 || { echo "ABORT: no singularity/4.1.0-nohost module"; exit 3; }
+  module load singularity/4.3.5-nohost > /dev/null 2>&1 || module load singularity/4.1.0-nohost > /dev/null 2>&1 \
+  || { echo "ABORT: no singularity/4.3.5-nohost (or 4.1.0-nohost) module"; exit 3; }
   # after the module, which points the cache at $MYSOFTWARE (on Setonix possibly another project's, unreadable: "Cache disabled")
   export SINGULARITY_CACHEDIR=/tmp/af3jax.$SLURM_JOB_ID/singularity-cache APPTAINER_CACHEDIR=/tmp/af3jax.$SLURM_JOB_ID/singularity-cache
   mkdir -p "$SINGULARITY_CACHEDIR"
