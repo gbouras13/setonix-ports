@@ -3,9 +3,17 @@
 Protenix v2 (`protenix` 2.0.0, ByteDance) on Setonix's MI250X GCDs, through the optimisation kit's `big` line, with the recipe that
 makes it run on gfx90a. The evidence is in `af3-setonix/PROTENIX_PORT.md`.
 
-**Status: not yet validated on Setonix** (`slurm/validate.sbatch` compares this image with the native port, byte for byte). Its first
-run (job 51182155) stopped at the weights fetch, because the checkpoint mirror is gone. `fetch-weights` now asks another (see "The
-checkpoint" below).
+- **Validated on Setonix** (2026-11-23), image `sha-403c9ea`, digest `sha256:30e0033f…` (job 53623658), by the checks that run inside
+  the image. Its comparison with the native port could not run: the /scratch purge had taken those outputs.
+  - **Weights:** `fetch-weights` fetched all seven files, each at the kit's pinned sha256 (`WEIGHTS OK: 7/7`).
+  - **`check --predict`:** passes every section on the 8 GCDs:
+    - versions and the kit's pin check;
+    - every GPU library loaded from inside the image;
+    - the kit's 1BRS example through stock Protenix and through the one-GCD line, byte-identical under deterministic algorithms.
+  - **Not checked here:** a comparison with the native port's stored runs (S1, K1, T8). The native one-GCD line was byte-identical to
+    stock (jobs 50030425, 50379609).
+  - The first run (job 51182155) stopped at the weights fetch when the checkpoint mirror went. `fetch-weights` now uses another
+    mirror (see "The checkpoint" below).
 
 What the native port measured:
 
