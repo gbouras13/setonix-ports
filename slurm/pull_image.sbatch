@@ -154,6 +154,6 @@ singularity inspect --labels "$SIF" | grep -E "org.opencontainers.image.(title|s
 singularity exec "$SIF" sh -c 'cat /opt/*/source.txt /opt/*/kit.txt /opt/*/wheel.txt /opt/*/build.txt 2>/dev/null' || true
 
 echo; echo "=== self-check without a GPU ==="
-singularity exec "$SIF" sh -c 'for c in af3jax colabfold proteinmpnn boltz2 protenix opendde esmfold2; do command -v "$c" > /dev/null && exec "$c" check --no-gpu; done
+singularity exec "$SIF" sh -c 'for c in af3jax colabfold proteinmpnn boltz2 protenix opendde esmfold2 openfold3 rfdiffusion3; do command -v "$c" > /dev/null && exec "$c" check --no-gpu; done
                                 command -v mmseqs > /dev/null && exec mmseqs version; echo "no known entry point"; exit 1'
 echo; echo "SIF ready: $SIF   (run it without --rocm)"
