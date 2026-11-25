@@ -41,7 +41,7 @@ at run time.
 # 1. pull it (a compute job; Pawsey asks for pulls there)
 sbatch --account=<project> slurm/pull_image.sbatch ghcr.io/gbouras13/setonix-ports/openfold3:main /scratch/<project>/$USER/singularity
 
-module load singularity/4.1.0-nohost
+module load singularity/4.3.5-nohost
 # 2. the checkpoint, once (in a compute job): 2.29 GB from OpenFold3's public bucket, checked against the S3 object's checksum
 singularity exec $SIF openfold3 fetch-weights /scratch/<project>/$USER/openfold3-weights
 
