@@ -33,13 +33,16 @@
 #   A1_REF      optional: an earlier A1's output directory (e.g. the native run's): every run is then also compared, sample by sample,
 #               with the same run there (same inputs, same seeds) -- the container-against-native check
 #   A1_OUT      where the results go (default $A1_DATA)
+#   A1_SKIP_OF3 1: leave out Mof3 (the OpenFold3-preview2 weights run) and its weights, for a site without of3_ported_weights.bin.zst;
+#               the other 14 runs and every check stay as they are
 set -uo pipefail
 for a in "$@"; do
   case "$a" in
-    A1_DATA=*|AF3_PARAMS=*|AF3JAX_SIF=*|OF3_WEIGHTS=*|A1_REF=*|A1_OUT=*|AF3JAX_W=*) export "${a?}" ;;
-    *) echo "unknown argument '$a': A1_DATA= AF3_PARAMS= AF3JAX_SIF= OF3_WEIGHTS= A1_REF= A1_OUT= AF3JAX_W="; exit 2 ;;
+    A1_DATA=*|AF3_PARAMS=*|AF3JAX_SIF=*|OF3_WEIGHTS=*|A1_REF=*|A1_OUT=*|AF3JAX_W=*|A1_SKIP_OF3=*) export "${a?}" ;;
+    *) echo "unknown argument '$a': A1_DATA= AF3_PARAMS= AF3JAX_SIF= OF3_WEIGHTS= A1_REF= A1_OUT= AF3JAX_W= A1_SKIP_OF3="; exit 2 ;;
   esac
 done
+SKIP_OF3=${A1_SKIP_OF3:-0}
 : "${A1_DATA:?set A1_DATA to the test data directory}" "${AF3_PARAMS:?set AF3_PARAMS to the official parameters directory}"
 IC=$A1_DATA/inputs_ceiling; MN=$A1_DATA/inputs_perf/hk97_mono_2s; M4=$A1_DATA/inputs_perf/hk97_4mer_2s
 XTAL=$A1_DATA/ref/1OHG.cif
@@ -58,14 +61,17 @@ if [ -n "${AF3JAX_SIF:-}" ]; then
   export SINGULARITY_CACHEDIR=/tmp/af3jax.$SLURM_JOB_ID/singularity-cache APPTAINER_CACHEDIR=/tmp/af3jax.$SLURM_JOB_ID/singularity-cache
   mkdir -p "$SINGULARITY_CACHEDIR"
   SX=(singularity exec -B "$OF3W:/opt/af3jax/weights/p2" "$AF3JAX_SIF")   # never --rocm (the host's ROCm 6.3.0 libraries)
+  [ "$SKIP_OF3" = 1 ] && SX=(singularity exec "$AF3JAX_SIF")
   PRED=("${SX[@]}" af3jax predict); PY=("${SX[@]}" af3jax python); SCRIPTS=/opt/af3jax/scripts
   NEED=("$AF3JAX_SIF" "$OF3W/of3_ported_weights.bin.zst")
+  [ "$SKIP_OF3" = 1 ] && NEED=("$AF3JAX_SIF")
 else
   MODE=native
   W=${AF3JAX_W:?set AF3JAX_SIF (container) or AF3JAX_W (native tree)}
   PRED=(bash "$W/scripts/af3jax_predict.sh"); PY=("$W/stockenv/bin/python"); SCRIPTS=$W/scripts
   NEED=("$W/stockenv/bin/python" "$W/scripts/af3jax_predict.sh" "$W/scripts/perf_launch.py" "$W/scripts/rowpair_launch.py" "$W/scripts/perf_cmp.py"
         "$W/scripts/compare_structs.py" "$W/scripts/patch_rocm_capability.py" "$W/scripts/patch_tokamax_rocm.py" "$W/weights/p2/of3_ported_weights.bin.zst")
+  [ "$SKIP_OF3" = 1 ] && unset 'NEED[${#NEED[@]}-1]'
 fi
 for f in "${NEED[@]}" "$XTAL" "$AF3P/af3.bin.zst" \
          "$IC/hk97_6mer/hk97_6mer.json" "$IC/hk97_8mer/hk97_8mer.json" "$IC/hk97_10mer/hk97_10mer.json" "$IC/hk97_12mer/hk97_12mer.json" \
@@ -125,7 +131,8 @@ pred() {   # pred NAME GCD REGIME INPUT_DIR RECYCLES TIMEOUT WEIGHTS(af3|of3) CA
 }
 passed() { [ "$(cat "$OUT/$1.rc" 2>/dev/null)" = 0 ] && grep -q "Done running" "$OUT/$1.log" 2>/dev/null; }
 LANES=()
-( pred Mauto 0 auto "$MN" 10 1500 af3 shared; pred Mauto2 0 auto "$MN" 10 1500 af3 shared; pred Mof3 0 auto "$MN" 10 1500 of3 shared ) & LANES+=($!)
+( pred Mauto 0 auto "$MN" 10 1500 af3 shared; pred Mauto2 0 auto "$MN" 10 1500 af3 shared
+  [ "$SKIP_OF3" = 1 ] || pred Mof3 0 auto "$MN" 10 1500 of3 shared ) & LANES+=($!)
 ( pred Mplain 1 stock1 "$MN" 10 1800 af3 private; pred B11 1 auto "$IN/hk97_11mer" 1 4500 af3 shared ) & LANES+=($!)
 pred Qauto  2 auto   "$M4" 10 3000 af3 shared & LANES+=($!)
 pred Qplain 3 stock1 "$M4" 10 4500 af3 private & LANES+=($!)
@@ -141,6 +148,7 @@ sleep 15
 pred Cauto  all auto   "$IC/hk97_12mer" 1 2400 af3 shared
 
 RUNS=(Mauto Mauto2 Mof3 Mplain Qauto Qplain Sauto Splain Oauto Oplain Bauto Bgt B11 Cauto Cplain)
+[ "$SKIP_OF3" = 1 ] && RUNS=(Mauto Mauto2 Mplain Qauto Qplain Sauto Splain Oauto Oplain Bauto Bgt B11 Cauto Cplain)
 # expected: regime, GEMM library, attention rows per call, pair-logits lever rows, weights
 declare -A EXPECT=( [Mauto]="A rocblas none off af3" [Mauto2]="A rocblas none off af3" [Mof3]="A rocblas none off of3"
                     [Qauto]="A rocblas none off af3" [Sauto]="A rocblas none off af3" [Oauto]="A rocblas fork off af3"
@@ -216,7 +224,7 @@ cmp_if() {
 }
 cmp_if "monomer, 10 recycles, 2 seeds: Mplain = plain (reference); Mauto = defaults; Mauto2 = defaults again from the warm cache" Mplain Mauto Mauto2
 cmp_if "monomer: Mauto against Mauto2 (the cache must reproduce it exactly: core 0.00)" Mauto Mauto2
-cmp_if "monomer on the default OpenFold3 weights: Mof3 against the official parameters' Mauto (different weights: information only)" Mauto Mof3
+[ "$SKIP_OF3" = 1 ] || cmp_if "monomer on the default OpenFold3 weights: Mof3 against the official parameters' Mauto (different weights: information only)" Mauto Mof3
 cmp_if "4-mer, 10 recycles, 2 seeds: Qplain = plain (reference); Qauto = defaults" Qplain Qauto
 cmp_if "6-mer, 1 recycle, 2 seeds: Splain = plain (reference); Sauto = defaults" Splain Sauto
 cmp_if "8-mer, 1 recycle, 1 seed: Oplain = plain (reference); Oauto = defaults" Oplain Oauto
