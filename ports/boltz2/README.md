@@ -3,6 +3,12 @@
 Boltz-2 (`boltz` 2.2.1) on Setonix's MI250X GCDs, through the optimisation kit's four modes, with the recipes that make each one run on
 gfx90a. The evidence is in `af3-setonix/BOLTZ2_PORT.md`.
 
+- **Validated on Setonix** (2026-11-25), image `sha-ca8bf3d`, digest `sha256:032a83f6…` (the #9 fix; job 53696944, every section
+  passes). It was checked against the image below rather than the native port, whose outputs and weights the /scratch purge has taken:
+  - **`boltz2 check --predict`** on all 8 GCDs passes, including the 398-token example through stock and `exact`, byte-identical.
+  - **The HK97 trimer through all six routes** (stock, `exact`, `fast`, `fast` with the row patch, one-GCD `big`, `big --n_gpu 2`):
+    byte-identical to the same routes in `sha256:18274f03…` (job 53696943), which matched the native port byte for byte.
+  - **Single sequence:** both images ran the HK97 trimer with `msa: empty`, because its native MSA is gone too.
 - **Validated on Setonix** (2026-10-15), image `sha-c360902`, digest `sha256:18274f03…` (job 50947435, every section passes):
   - `boltz2 check --predict` on all 8 GCDs: the tree, the kit's pin check, the weights through the kit's own weights verb, every GPU
     library loaded from inside the image, and the kit's 398-token example through stock and `exact` inside the image, byte-identical.
